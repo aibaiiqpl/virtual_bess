@@ -3,7 +3,7 @@ module virtual_bess
 go 1.24.0
 
 require (
-	aiwatt.net/ems/go-common v0.0.0
+	aiwatt.net/ems/go-common v1.1.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -14,4 +14,4 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 )
 
-replace aiwatt.net/ems/go-common => /tmp/go-common
+replace aiwatt.net/ems/go-common v1.1.0 => cnb.cool/aiwatt/ems/go-common v1.1.0
