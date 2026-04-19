@@ -12,11 +12,11 @@
 
 ```yaml
 bess:
-  rated_capacity_kwh: 100    # 额定容量 kWh
-  rated_power_kw: 50         # 额定功率 kW
+  rated_capacity_kwh: 261    # 额定容量 kWh
+  rated_power_kw: 120        # 额定功率 kW
   initial_soc: 50.0          # 初始 SOC %
-  soh: 100.0                 # SOH %（固定）
-  battery_voltage: 512       # 电池总电压 V（固定）
+  soh: 30.0                  # SOH %（固定）
+  battery_voltage: 800       # 电池标称电压 V（随 SOC ±10% 变化）
   grid_voltage: 220          # 三相电压 V（±5% 波动）
 
 modbus:

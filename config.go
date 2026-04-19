@@ -31,12 +31,40 @@ type Config struct {
 	Log    LogConfig    `yaml:"log"`
 }
 
+func DefaultConfig() Config {
+	return Config{
+		BESS: BESSConfig{
+			RatedCapacityKWh: 261,
+			RatedPowerKW:     120,
+			InitialSOC:       50.0,
+			SOH:              30.0,
+			BatteryVoltage:   800,
+			GridVoltage:      220,
+		},
+		Modbus: ModbusConfig{
+			Address: ":502",
+		},
+		Log: LogConfig{
+			Level:   "info",
+			Console: true,
+		},
+	}
+}
+
+// LoadConfig loads configuration from a YAML file.
+// If path is empty or the file does not exist, returns default config.
 func LoadConfig(path string) (*Config, error) {
+	cfg := DefaultConfig()
+	if path == "" {
+		return &cfg, nil
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return &cfg, nil
+		}
 		return nil, err
 	}
-	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}

@@ -1,9 +1,9 @@
 bess:
-  rated_capacity_kwh: 100
-  rated_power_kw: 50
+  rated_capacity_kwh: 261
+  rated_power_kw: 120
   initial_soc: 50.0
-  soh: 100.0
-  battery_voltage: 512
+  soh: 30.0
+  battery_voltage: 800
   grid_voltage: 220
 
 modbus:

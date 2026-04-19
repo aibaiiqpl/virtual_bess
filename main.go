@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -12,7 +13,8 @@ import (
 )
 
 func main() {
-	cfgPath := flag.String("config", "config.yaml", "path to config file")
+	cfgPath := flag.String("config", "", "path to config file (optional)")
+	port := flag.Int("port", 0, "modbus TCP port (overrides config)")
 	flag.Parse()
 
 	cfg, err := LoadConfig(*cfgPath)
@@ -20,7 +22,17 @@ func main() {
 		panic("failed to load config: " + err.Error())
 	}
 
-	zaplog.InitZapLogger(cfg.Log.Console, cfg.Log.File, cfg.Log.Level)
+	// CLI port flag overrides config
+	if *port > 0 {
+		cfg.Modbus.Address = fmt.Sprintf(":%d", *port)
+	}
+
+	// Initialize logger: console-only when no log file configured
+	if cfg.Log.File != "" {
+		zaplog.InitZapLogger(cfg.Log.Console, cfg.Log.File, cfg.Log.Level)
+	} else {
+		zaplog.InitZapLogger(true, "", cfg.Log.Level)
+	}
 	defer zaplog.Defer()
 
 	zaplog.Infof("starting virtual BESS, capacity=%.1f kWh, power=%.1f kW",
