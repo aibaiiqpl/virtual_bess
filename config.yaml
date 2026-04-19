@@ -1,0 +1,15 @@
+bess:
+  rated_capacity_kwh: 100
+  rated_power_kw: 50
+  initial_soc: 50.0
+  soh: 100.0
+  battery_voltage: 512
+  grid_voltage: 220
+
+modbus:
+  address: ":502"
+
+log:
+  file: "logs/virtual_bess.log"
+  level: "info"
+  console: true

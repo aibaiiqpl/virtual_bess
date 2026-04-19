@@ -1,0 +1,54 @@
+package main
+
+import (
+	"flag"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"aiwatt.net/ems/go-common/mbserver"
+	"aiwatt.net/ems/go-common/zaplog"
+)
+
+func main() {
+	cfgPath := flag.String("config", "config.yaml", "path to config file")
+	flag.Parse()
+
+	cfg, err := LoadConfig(*cfgPath)
+	if err != nil {
+		panic("failed to load config: " + err.Error())
+	}
+
+	zaplog.InitZapLogger(cfg.Log.Console, cfg.Log.File, cfg.Log.Level)
+	defer zaplog.Defer()
+
+	zaplog.Infof("starting virtual BESS, capacity=%.1f kWh, power=%.1f kW",
+		cfg.BESS.RatedCapacityKWh, cfg.BESS.RatedPowerKW)
+
+	server := mbserver.NewServer()
+	if err := server.ListenTCP(cfg.Modbus.Address); err != nil {
+		zaplog.Panicf("failed to start modbus server on %s: %v", cfg.Modbus.Address, err)
+	}
+	zaplog.Infof("modbus TCP server listening on %s", cfg.Modbus.Address)
+
+	bess := NewBESS(cfg, server)
+
+	// Simulation loop: tick every second
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+
+	for {
+		select {
+		case <-ticker.C:
+			bess.Tick()
+		case sig := <-sigCh:
+			zaplog.Infof("received signal %v, shutting down", sig)
+			server.Close()
+			return
+		}
+	}
+}

@@ -1,0 +1,89 @@
+package main
+
+// PCS control registers (writable)
+const (
+	RegPCSGridMode      = 30000 // 0-grid-tied, 1-off-grid
+	RegPCSRunMode       = 30001 // 2-constant power
+	RegPCSFaultReset    = 30002 // 1-reset
+	RegPCSStartup       = 30003 // 1-start
+	RegPCSShutdown      = 30004 // 1-shutdown
+	RegPCSEStop         = 30005 // 1-emergency stop
+	RegPCSRemoteLocal   = 30006 // 0-local, 1-remote
+	RegPCSPowerCmd      = 30010 // S16, 0.1kW, positive=charge, negative=discharge
+)
+
+// PCS status registers (read-only)
+const (
+	RegPCSRemoteStatus  = 30049 // 0-local, 1-remote
+	RegPCSSysStatus     = 30050 // 1-stopped, 2-standby, 3-charging, 4-discharging
+	RegPCSGridStatus    = 30051 // 0-grid-tied, 1-off-grid
+	RegPCSAlarmStatus   = 30052 // 0-normal, 1-alarm
+	RegPCSFaultStatus   = 30053 // 0-normal, 1-fault
+
+	RegPCSPowerFactor   = 30060 // S16, 0.01
+	RegPCSTotalActivePW = 30061 // S16, 0.1 kW
+	RegPCSTotalReactPW  = 30062 // S16, 0.1 kVAr
+	RegPCSTotalApparent = 30063 // U16, 0.1 kVA
+	RegPCSActivePWA     = 30064 // S16, 0.1 kW
+	RegPCSActivePWB     = 30065
+	RegPCSActivePWC     = 30066
+	RegPCSReactPWA      = 30067 // S16, 0.1 kVAr
+	RegPCSReactPWB      = 30068
+	RegPCSReactPWC      = 30069
+	RegPCSVoltageA      = 30070 // U16, 0.1 V
+	RegPCSVoltageB      = 30071
+	RegPCSVoltageC      = 30072
+	RegPCSCurrentA      = 30073 // S16, 0.1 A
+	RegPCSCurrentB      = 30074
+	RegPCSCurrentC      = 30075
+	RegPCSFrequency     = 30076 // U16, 0.01 Hz
+	RegPCSDCVoltage     = 30077 // S16, 0.1 V
+	RegPCSDCCurrent     = 30078 // S16, 0.1 A
+	RegPCSDCPower       = 30079 // S16, 0.1 kW
+	RegPCSInternalTemp  = 30080 // S16, 0.1 °C
+	RegPCSIGBTTempA     = 30081
+	RegPCSIGBTTempB     = 30082
+	RegPCSIGBTTempC     = 30083
+)
+
+// PCS fault registers (read-only)
+const (
+	RegPCSDCUnderVolt = 30180 // 1-DC undervoltage fault (BMS not closed)
+)
+
+// BMS control registers (writable)
+const (
+	RegBMSFaultReset = 40000 // 1-reset
+	RegBMSCloseHV    = 40001 // 1-close contactor (energize)
+	RegBMSOpenHV     = 40002 // 1-open contactor (de-energize)
+)
+
+// BMS status registers (read-only)
+const (
+	RegBMSFaultStatus     = 40100 // 0-normal, 1-fault
+	RegBMSAlarmStatus     = 40101 // 0-normal, 1-alarm
+	RegBMSSysStatus       = 40102 // 0-starting, 1-standby, 2-stopped, 3-charging, 4-discharging
+	RegBMSChargeForbid    = 40103 // 0-normal, 1-forbidden
+	RegBMSDischargeForbid = 40104 // 0-normal, 1-forbidden
+	RegBMSSOC             = 40105 // U16, 0.1 %
+	RegBMSSOH             = 40106 // U16, 0.1 %
+	RegBMSRemainCharge    = 40107 // U16, 0.1 kWh
+	RegBMSRemainDischarge = 40108 // U16, 0.1 kWh
+	RegBMSVoltage         = 40109 // U16, 0.1 V
+	RegBMSCurrent         = 40110 // S16, 0.1 A
+	RegBMSPower           = 40111 // S16, 0.1 kW
+	RegBMSMaxChargePW     = 40120 // U16, 0.1 kW
+	RegBMSMaxDischargePW  = 40121 // U16, 0.1 kW
+	RegBMSMaxChargeI      = 40122 // U16, 0.1 A
+	RegBMSMaxDischargeI   = 40123 // U16, 0.1 A
+)
+
+// int16ToUint16 converts a signed int16 value to uint16 for register storage.
+func int16ToUint16(v int16) uint16 {
+	return uint16(v)
+}
+
+// uint16ToInt16 converts a uint16 register value back to signed int16.
+func uint16ToInt16(v uint16) int16 {
+	return int16(v)
+}
