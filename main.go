@@ -40,7 +40,8 @@ func main() {
 
 	server := mbserver.NewServer()
 	if err := server.ListenTCP(cfg.Modbus.Address); err != nil {
-		zaplog.Panicf("failed to start modbus server on %s: %v", cfg.Modbus.Address, err)
+		zaplog.Errorf("failed to start modbus server on %s: %v", cfg.Modbus.Address, err)
+		os.Exit(1)
 	}
 	zaplog.Infof("modbus TCP server listening on %s", cfg.Modbus.Address)
 
