@@ -43,9 +43,17 @@ func (b *BESS) syncSystemStatus(powerKW float64) {
 	// Run mode: 2 = remote passive
 	s.HoldingRegisters[RegSysRunMode] = 2
 
-	// Sync max charge/discharge power from BMS limits
-	s.HoldingRegisters[RegSysMaxChargePW] = s.HoldingRegisters[RegBMSMaxChargePW]
-	s.HoldingRegisters[RegSysMaxDischargePW] = s.HoldingRegisters[RegBMSMaxDischargePW]
+	// Sync max charge/discharge power: take min of BMS limit and external setting (if non-zero)
+	sysMaxCharge := s.HoldingRegisters[RegBMSMaxChargePW]
+	if ext := s.HoldingRegisters[RegMaxChargePWSetting]; ext != 0 && ext < sysMaxCharge {
+		sysMaxCharge = ext
+	}
+	sysMaxDischarge := s.HoldingRegisters[RegBMSMaxDischargePW]
+	if ext := s.HoldingRegisters[RegMaxDischargePWSetting]; ext != 0 && ext < sysMaxDischarge {
+		sysMaxDischarge = ext
+	}
+	s.HoldingRegisters[RegSysMaxChargePW] = sysMaxCharge
+	s.HoldingRegisters[RegSysMaxDischargePW] = sysMaxDischarge
 
 	// Current actual total power (absolute value)
 	s.HoldingRegisters[RegSysActualPower] = uint16(math.Abs(powerKW) * 10)

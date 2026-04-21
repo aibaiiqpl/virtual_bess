@@ -13,6 +13,9 @@ const (
 	RegSysActualPower    = 103 // U16, 0.1 kW, current actual total power
 	RegBMSMasterMode     = 104 // 1-master mode
 	RegBMSClusterCount   = 105 // number of BMS clusters
+
+	RegMaxChargePWSetting   = 700 // U16, 0.1 kW, read/write, max allowed charge power override
+	RegMaxDischargePWSetting = 701 // U16, 0.1 kW, read/write, max allowed discharge power override
 )
 
 // PCS control registers (writable)
