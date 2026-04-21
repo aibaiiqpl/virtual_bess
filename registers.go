@@ -1,5 +1,20 @@
 package main
 
+// System-level status registers (read-only)
+const (
+	RegSysRunning    = 1   // 0-none, 1-running
+	RegSysFault      = 2   // 0-none, 1-other fault, 2-charge fault, 3-discharge fault
+	RegSysStandby    = 3   // 0-none, 1-standby
+	RegEMUBMSComm    = 4   // 0-offline, 1-online
+	RegEMUPCSComm    = 5   // 0-offline, 1-online
+	RegSysRunMode        = 100 // 0-local manual, 1-local auto, 2-remote passive
+	RegSysMaxChargePW    = 101 // U16, 0.1 kW, synced with RegBMSMaxChargePW
+	RegSysMaxDischargePW = 102 // U16, 0.1 kW, synced with RegBMSMaxDischargePW
+	RegSysActualPower    = 103 // U16, 0.1 kW, current actual total power
+	RegBMSMasterMode     = 104 // 1-master mode
+	RegBMSClusterCount   = 105 // number of BMS clusters
+)
+
 // PCS control registers (writable)
 const (
 	RegPCSGridMode      = 30000 // 0-grid-tied, 1-off-grid

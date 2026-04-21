@@ -20,6 +20,39 @@ func (b *BESS) syncRegisters() {
 	b.syncBMSStatus(soc, powerKW)
 	b.syncBMSEnergy(soc, batVoltage, powerKW)
 	b.syncBMSLimits(soc, batVoltage)
+	b.syncSystemStatus(powerKW) // after BMS limits, reads RegBMSMaxChargePW/DischargePW
+}
+
+// syncSystemStatus updates system-level status registers (1-5, 100-102).
+func (b *BESS) syncSystemStatus(powerKW float64) {
+	s := b.server
+
+	// System running: 1 when PCS is running
+	s.HoldingRegisters[RegSysRunning] = boolToU16(b.pcsRunning)
+
+	// System fault: always 0 in normal simulation
+	s.HoldingRegisters[RegSysFault] = 0
+
+	// System standby: 1 when PCS running but no power output
+	s.HoldingRegisters[RegSysStandby] = boolToU16(b.pcsRunning && powerKW == 0)
+
+	// EMU-BMS and EMU-PCS communication: always online
+	s.HoldingRegisters[RegEMUBMSComm] = 1
+	s.HoldingRegisters[RegEMUPCSComm] = 1
+
+	// Run mode: 2 = remote passive
+	s.HoldingRegisters[RegSysRunMode] = 2
+
+	// Sync max charge/discharge power from BMS limits
+	s.HoldingRegisters[RegSysMaxChargePW] = s.HoldingRegisters[RegBMSMaxChargePW]
+	s.HoldingRegisters[RegSysMaxDischargePW] = s.HoldingRegisters[RegBMSMaxDischargePW]
+
+	// Current actual total power (absolute value)
+	s.HoldingRegisters[RegSysActualPower] = uint16(math.Abs(powerKW) * 10)
+
+	// BMS master mode and cluster count: fixed values
+	s.HoldingRegisters[RegBMSMasterMode] = 1
+	s.HoldingRegisters[RegBMSClusterCount] = 1
 }
 
 // syncPCSStatus updates PCS system status, fault, and alarm registers.
