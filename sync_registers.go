@@ -27,14 +27,13 @@ func (b *BESS) syncRegisters() {
 func (b *BESS) syncSystemStatus(powerKW float64) {
 	s := b.server
 
-	// System running: 1 when PCS is running
-	s.HoldingRegisters[RegSysRunning] = boolToU16(b.pcsRunning)
+	// Mutually exclusive: only one of running/fault/standby can be 1
+	hasFault := s.HoldingRegisters[RegPCSFaultStatus] == 1 || s.HoldingRegisters[RegBMSFaultStatus] == 1
+	isRunning := b.pcsRunning && powerKW != 0 && !hasFault
 
-	// System fault: always 0 in normal simulation
-	s.HoldingRegisters[RegSysFault] = 0
-
-	// System standby: 1 when PCS running but no power output
-	s.HoldingRegisters[RegSysStandby] = boolToU16(b.pcsRunning && powerKW == 0)
+	s.HoldingRegisters[RegSysRunning] = boolToU16(isRunning)
+	s.HoldingRegisters[RegSysFault] = boolToU16(hasFault)
+	s.HoldingRegisters[RegSysStandby] = boolToU16(!isRunning && !hasFault)
 
 	// EMU-BMS and EMU-PCS communication: always online
 	s.HoldingRegisters[RegEMUBMSComm] = 1
