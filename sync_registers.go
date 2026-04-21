@@ -50,8 +50,12 @@ func (b *BESS) syncSystemStatus(powerKW float64) {
 	// Current actual total power (absolute value)
 	s.HoldingRegisters[RegSysActualPower] = uint16(math.Abs(powerKW) * 10)
 
-	// BMS master mode and cluster count
-	s.HoldingRegisters[RegBMSMasterMode] = 1
+	// BMS master mode: 1-single cluster, 2-multi cluster
+	if b.clusterCount > 1 {
+		s.HoldingRegisters[RegBMSMasterMode] = 2
+	} else {
+		s.HoldingRegisters[RegBMSMasterMode] = 1
+	}
 	s.HoldingRegisters[RegBMSClusterCount] = uint16(b.clusterCount)
 }
 
