@@ -93,6 +93,43 @@ const (
 	RegBMSMaxDischargeI   = 40123 // U16, 0.1 A
 )
 
+// Cluster Input Register layout: each cluster occupies a block with stride 1600.
+// Cluster N starts at N*1600, data offsets 1~20 within each block.
+const (
+	IRClusterStride = 1600
+
+	OffClusterStatus        = 1  // 0-offline,1-standby,2-stopped,3-charging,4-discharging,5-running,6-fault
+	OffClusterSOC           = 2  // U16, 0.1 %
+	OffClusterSOH           = 3  // U16, 0.1 %
+	OffClusterRemainCharge  = 4  // U16, 0.1 kWh
+	OffClusterRemainDischarge = 5 // U16, 0.1 kWh
+	OffClusterVoltage       = 6  // U16, 0.1 V
+	OffClusterCurrent       = 7  // S16, 0.1 A
+	OffClusterPower         = 8  // S16, 0.1 kW
+	OffClusterTotalChargeHi = 9  // U32 high word, 0.1 kWh
+	OffClusterTotalChargeLo = 10 // U32 low word
+	OffClusterTotalDischHi  = 11 // U32 high word, 0.1 kWh
+	OffClusterTotalDischLo  = 12 // U32 low word
+	OffClusterSessChargeHi  = 13 // U32 high word, 0.1 kWh (session)
+	OffClusterSessChargeLo  = 14 // U32 low word
+	OffClusterSessDischHi   = 15 // U32 high word, 0.1 kWh (session)
+	OffClusterSessDischLo   = 16 // U32 low word
+	OffClusterMaxChargePW   = 17 // U16, 0.1 kW
+	OffClusterMaxDischargePW = 18 // U16, 0.1 kW
+	OffClusterMaxChargeI    = 19 // U16, 0.1 A
+	OffClusterMaxDischargeI = 20 // U16, 0.1 A
+)
+
+// clusterIR returns the absolute Input Register address for a given cluster index and offset.
+func clusterIR(clusterIdx int, offset uint16) uint16 {
+	return uint16(clusterIdx*IRClusterStride) + offset
+}
+
+// uint32ToRegs splits a uint32 into high and low uint16 words (big-endian).
+func uint32ToRegs(v uint32) (hi, lo uint16) {
+	return uint16(v >> 16), uint16(v & 0xFFFF)
+}
+
 // int16ToUint16 converts a signed int16 value to uint16 for register storage.
 func int16ToUint16(v int16) uint16 {
 	return uint16(v)

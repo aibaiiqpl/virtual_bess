@@ -21,6 +21,7 @@ func (b *BESS) syncRegisters() {
 	b.syncBMSEnergy(soc, batVoltage, powerKW)
 	b.syncBMSLimits(soc, batVoltage)
 	b.syncSystemStatus(powerKW) // after BMS limits, reads RegBMSMaxChargePW/DischargePW
+	b.syncClusterRegisters(soc, batVoltage, powerKW)
 }
 
 // syncSystemStatus updates system-level status registers (1-5, 100-102).
@@ -49,9 +50,9 @@ func (b *BESS) syncSystemStatus(powerKW float64) {
 	// Current actual total power (absolute value)
 	s.HoldingRegisters[RegSysActualPower] = uint16(math.Abs(powerKW) * 10)
 
-	// BMS master mode and cluster count: fixed values
+	// BMS master mode and cluster count
 	s.HoldingRegisters[RegBMSMasterMode] = 1
-	s.HoldingRegisters[RegBMSClusterCount] = 1
+	s.HoldingRegisters[RegBMSClusterCount] = uint16(b.clusterCount)
 }
 
 // syncPCSStatus updates PCS system status, fault, and alarm registers.
@@ -215,4 +216,77 @@ func (b *BESS) syncBMSLimits(soc, batVoltage float64) {
 	s.HoldingRegisters[RegBMSMaxDischargePW] = uint16(maxDischargePW * 10)
 	s.HoldingRegisters[RegBMSMaxChargeI] = uint16(maxChargeI * 10)
 	s.HoldingRegisters[RegBMSMaxDischargeI] = uint16(maxDischargeI * 10)
+}
+
+// syncClusterRegisters writes per-cluster data to Input Registers.
+// Each cluster gets equal share of power/current/energy; SOC/SOH/voltage are identical.
+func (b *BESS) syncClusterRegisters(soc, batVoltage, powerKW float64) {
+	s := b.server
+	n := b.clusterCount
+	clusterPowerKW := powerKW / float64(n)
+	clusterCurrentA := 0.0
+	if batVoltage > 0 {
+		clusterCurrentA = clusterPowerKW * 1000.0 / batVoltage
+	}
+
+	// Cluster status mirrors BMS system status
+	var clusterStatus uint16
+	switch {
+	case !b.bmsHVClosed:
+		clusterStatus = 2 // stopped
+	case powerKW > 0:
+		clusterStatus = 3 // charging
+	case powerKW < 0:
+		clusterStatus = 4 // discharging
+	case b.pcsRunning:
+		clusterStatus = 5 // running (idle)
+	default:
+		clusterStatus = 1 // standby (HV closed, PCS not running)
+	}
+
+	remainCharge := (b.ratedCapacityKWh - b.currentEnergyKWh) / float64(n)
+	remainDischarge := b.currentEnergyKWh / float64(n)
+
+	totalChargeU32 := uint32(b.totalChargeKWh / float64(n) * 10)
+	totalDischU32 := uint32(b.totalDischargeKWh / float64(n) * 10)
+	sessChargeU32 := uint32(b.sessionChargeKWh / float64(n) * 10)
+	sessDischU32 := uint32(b.sessionDischargeKWh / float64(n) * 10)
+
+	ratedCurrentA := b.ratedPowerKW * 1000.0 / batVoltage
+	maxChargePW, maxDischargePW := b.ratedPowerKW/float64(n), b.ratedPowerKW/float64(n)
+	maxChargeI, maxDischargeI := ratedCurrentA/float64(n), ratedCurrentA/float64(n)
+	if soc >= 100.0 {
+		maxChargePW, maxChargeI = 0, 0
+	}
+	if soc <= 0.0 {
+		maxDischargePW, maxDischargeI = 0, 0
+	}
+
+	totalChargeHi, totalChargeLo := uint32ToRegs(totalChargeU32)
+	totalDischHi, totalDischLo := uint32ToRegs(totalDischU32)
+	sessChargeHi, sessChargeLo := uint32ToRegs(sessChargeU32)
+	sessDischHi, sessDischLo := uint32ToRegs(sessDischU32)
+
+	for i := 0; i < n; i++ {
+		s.InputRegisters[clusterIR(i, OffClusterStatus)] = clusterStatus
+		s.InputRegisters[clusterIR(i, OffClusterSOC)] = uint16(soc * 10)
+		s.InputRegisters[clusterIR(i, OffClusterSOH)] = uint16(b.soh * 10)
+		s.InputRegisters[clusterIR(i, OffClusterRemainCharge)] = uint16(remainCharge * 10)
+		s.InputRegisters[clusterIR(i, OffClusterRemainDischarge)] = uint16(remainDischarge * 10)
+		s.InputRegisters[clusterIR(i, OffClusterVoltage)] = uint16(batVoltage * 10)
+		s.InputRegisters[clusterIR(i, OffClusterCurrent)] = int16ToUint16(int16(clusterCurrentA * 10))
+		s.InputRegisters[clusterIR(i, OffClusterPower)] = int16ToUint16(int16(clusterPowerKW * 10))
+		s.InputRegisters[clusterIR(i, OffClusterTotalChargeHi)] = totalChargeHi
+		s.InputRegisters[clusterIR(i, OffClusterTotalChargeLo)] = totalChargeLo
+		s.InputRegisters[clusterIR(i, OffClusterTotalDischHi)] = totalDischHi
+		s.InputRegisters[clusterIR(i, OffClusterTotalDischLo)] = totalDischLo
+		s.InputRegisters[clusterIR(i, OffClusterSessChargeHi)] = sessChargeHi
+		s.InputRegisters[clusterIR(i, OffClusterSessChargeLo)] = sessChargeLo
+		s.InputRegisters[clusterIR(i, OffClusterSessDischHi)] = sessDischHi
+		s.InputRegisters[clusterIR(i, OffClusterSessDischLo)] = sessDischLo
+		s.InputRegisters[clusterIR(i, OffClusterMaxChargePW)] = uint16(maxChargePW * 10)
+		s.InputRegisters[clusterIR(i, OffClusterMaxDischargePW)] = uint16(maxDischargePW * 10)
+		s.InputRegisters[clusterIR(i, OffClusterMaxChargeI)] = uint16(maxChargeI * 10)
+		s.InputRegisters[clusterIR(i, OffClusterMaxDischargeI)] = uint16(maxDischargeI * 10)
+	}
 }

@@ -27,6 +27,13 @@ type BESS struct {
 	remoteMode       bool    // true=remote, false=local
 	gridTied         bool    // true=grid-tied, false=off-grid
 	actualPowerKW    float64 // current power: positive=charge, negative=discharge
+	clusterCount     int     // number of BMS clusters
+
+	// Cumulative energy tracking (kWh)
+	totalChargeKWh   float64 // lifetime cumulative charge energy
+	totalDischargeKWh float64 // lifetime cumulative discharge energy
+	sessionChargeKWh float64 // current session cumulative charge energy
+	sessionDischargeKWh float64 // current session cumulative discharge energy
 
 	server   *mbserver.Server
 	lastTick time.Time
@@ -43,6 +50,7 @@ func NewBESS(cfg *Config, server *mbserver.Server) *BESS {
 		batteryVoltageNom: cfg.BESS.BatteryVoltage,
 		gridVoltage:       cfg.BESS.GridVoltage,
 		currentEnergyKWh:  initialEnergy,
+		clusterCount:      cfg.BESS.ClusterCount,
 		remoteMode:        true,
 		gridTied:          true,
 		server:            server,

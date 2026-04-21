@@ -23,6 +23,15 @@ func (b *BESS) updateSimulation(dtSeconds float64) {
 	deltaEnergy := b.actualPowerKW * dtSeconds / 3600.0
 	b.currentEnergyKWh += deltaEnergy
 
+	// Track cumulative charge/discharge energy
+	if deltaEnergy > 0 {
+		b.totalChargeKWh += deltaEnergy
+		b.sessionChargeKWh += deltaEnergy
+	} else if deltaEnergy < 0 {
+		b.totalDischargeKWh += -deltaEnergy
+		b.sessionDischargeKWh += -deltaEnergy
+	}
+
 	// Clamp stored energy to valid range
 	if b.currentEnergyKWh < 0 {
 		b.currentEnergyKWh = 0

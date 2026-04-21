@@ -35,8 +35,8 @@ func main() {
 	}
 	defer zaplog.Defer()
 
-	zaplog.Infof("starting virtual BESS, capacity=%.1f kWh, power=%.1f kW",
-		cfg.BESS.RatedCapacityKWh, cfg.BESS.RatedPowerKW)
+	zaplog.Infof("starting virtual BESS, capacity=%.1f kWh, power=%.1f kW, clusters=%d",
+		cfg.BESS.RatedCapacityKWh, cfg.BESS.RatedPowerKW, cfg.BESS.ClusterCount)
 
 	server := mbserver.NewServer()
 	if err := server.ListenTCP(cfg.Modbus.Address); err != nil {

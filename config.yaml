@@ -5,6 +5,7 @@ bess:
   soh: 100.0
   battery_voltage: 800
   grid_voltage: 220
+  cluster_count: 1
 
 modbus:
   address: ":502"

@@ -13,6 +13,7 @@ type BESSConfig struct {
 	SOH              float64 `yaml:"soh"`
 	BatteryVoltage   float64 `yaml:"battery_voltage"`
 	GridVoltage      float64 `yaml:"grid_voltage"`
+	ClusterCount     int     `yaml:"cluster_count"`
 }
 
 type ModbusConfig struct {
@@ -40,6 +41,7 @@ func DefaultConfig() Config {
 			SOH:              100.0,
 			BatteryVoltage:   800,
 			GridVoltage:      220,
+			ClusterCount:     1,
 		},
 		Modbus: ModbusConfig{
 			Address: ":502",
@@ -67,6 +69,9 @@ func LoadConfig(path string) (*Config, error) {
 	}
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
+	}
+	if cfg.BESS.ClusterCount < 1 {
+		cfg.BESS.ClusterCount = 1
 	}
 	return &cfg, nil
 }
