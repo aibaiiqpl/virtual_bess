@@ -1,0 +1,16 @@
+[Unit]
+Description=Virtual BESS Multi Instance Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/opt/mock_emu/start_virtual_bess.sh
+Restart=always
+RestartSec=5
+
+# 推荐加上
+WorkingDirectory=/opt/mock_emu
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
