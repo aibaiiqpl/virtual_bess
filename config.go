@@ -36,8 +36,8 @@ func DefaultConfig() Config {
 		BESS: BESSConfig{
 			RatedCapacityKWh: 261,
 			RatedPowerKW:     120,
-			InitialSOC:       50.0,
-			SOH:              30.0,
+			InitialSOC:       30.0,
+			SOH:              100.0,
 			BatteryVoltage:   800,
 			GridVoltage:      220,
 		},
