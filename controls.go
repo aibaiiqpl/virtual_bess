@@ -1,6 +1,10 @@
 package main
 
-import "aiwatt.net/ems/go-common/zaplog"
+import (
+	"math/rand"
+
+	"aiwatt.net/ems/go-common/zaplog"
+)
 
 // processBMSControls handles BMS contactor and fault reset commands.
 // Command registers are auto-cleared after processing.
@@ -91,7 +95,9 @@ func (b *BESS) processPowerCommand() {
 		if cmdPowerKW < -b.ratedPowerKW {
 			cmdPowerKW = -b.ratedPowerKW
 		}
-		b.actualPowerKW = cmdPowerKW
+		// Apply ±0.5% random fluctuation to simulate real-world power tracking error
+		jitter := 1.0 + (rand.Float64()*0.01 - 0.005)
+		b.actualPowerKW = cmdPowerKW * jitter
 	} else if !b.remoteMode {
 		// Local mode: ignore power command, keep current power unchanged
 	} else {
