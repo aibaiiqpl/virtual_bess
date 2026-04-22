@@ -2,11 +2,11 @@ package main
 
 // System-level status registers (read-only)
 const (
-	RegSysRunning    = 1   // 0-none, 1-running
-	RegSysFault      = 2   // 0-none, 1-other fault, 2-charge fault, 3-discharge fault
-	RegSysStandby    = 3   // 0-none, 1-standby
-	RegEMUBMSComm    = 4   // 0-offline, 1-online
-	RegEMUPCSComm    = 5   // 0-offline, 1-online
+	RegSysRunning        = 1   // 0-none, 1-running
+	RegSysFault          = 2   // 0-none, 1-other fault, 2-charge fault, 3-discharge fault
+	RegSysStandby        = 3   // 0-none, 1-standby
+	RegEMUBMSComm        = 4   // 0-offline, 1-online
+	RegEMUPCSComm        = 5   // 0-offline, 1-online
 	RegSysRunMode        = 100 // 0-local manual, 1-local auto, 2-remote passive
 	RegSysMaxChargePW    = 101 // U16, 0.1 kW, synced with RegBMSMaxChargePW
 	RegSysMaxDischargePW = 102 // U16, 0.1 kW, synced with RegBMSMaxDischargePW
@@ -14,7 +14,7 @@ const (
 	RegBMSMasterMode     = 104 // 1-master mode
 	RegBMSClusterCount   = 105 // number of BMS clusters
 
-	RegMaxChargePWSetting   = 700 // U16, 0.1 kW, read/write, max allowed charge power override
+	RegMaxChargePWSetting    = 700 // U16, 0.1 kW, read/write, max allowed charge power override
 	RegMaxDischargePWSetting = 701 // U16, 0.1 kW, read/write, max allowed discharge power override
 )
 
@@ -27,16 +27,17 @@ const (
 	RegPCSShutdown      = 30004 // 1-shutdown
 	RegPCSEStop         = 30005 // 1-emergency stop
 	RegPCSRemoteLocal   = 30006 // 0-local, 1-remote
+	RegPCSPowerCmdAlias = 3010  // S16, 0.1kW, alias of RegPCSPowerCmd
 	RegPCSPowerCmd      = 30010 // S16, 0.1kW, positive=charge, negative=discharge
 )
 
 // PCS status registers (read-only)
 const (
-	RegPCSRemoteStatus  = 30049 // 0-local, 1-remote
-	RegPCSSysStatus     = 30050 // 1-stopped, 2-standby, 3-charging, 4-discharging
-	RegPCSGridStatus    = 30051 // 0-grid-tied, 1-off-grid
-	RegPCSAlarmStatus   = 30052 // 0-normal, 1-alarm
-	RegPCSFaultStatus   = 30053 // 0-normal, 1-fault
+	RegPCSRemoteStatus = 30049 // 0-local, 1-remote
+	RegPCSSysStatus    = 30050 // 1-stopped, 2-standby, 3-charging, 4-discharging
+	RegPCSGridStatus   = 30051 // 0-grid-tied, 1-off-grid
+	RegPCSAlarmStatus  = 30052 // 0-normal, 1-alarm
+	RegPCSFaultStatus  = 30053 // 0-normal, 1-fault
 
 	RegPCSPowerFactor   = 30060 // S16, 0.01
 	RegPCSTotalActivePW = 30061 // S16, 0.1 kW
@@ -101,26 +102,26 @@ const (
 const (
 	IRClusterStride = 1600
 
-	OffClusterStatus        = 1  // 0-offline,1-standby,2-stopped,3-charging,4-discharging,5-running,6-fault
-	OffClusterSOC           = 2  // U16, 0.1 %
-	OffClusterSOH           = 3  // U16, 0.1 %
-	OffClusterRemainCharge  = 4  // U16, 0.1 kWh
-	OffClusterRemainDischarge = 5 // U16, 0.1 kWh
-	OffClusterVoltage       = 6  // U16, 0.1 V
-	OffClusterCurrent       = 7  // S16, 0.1 A
-	OffClusterPower         = 8  // S16, 0.1 kW
-	OffClusterTotalChargeHi = 9  // U32 high word, 0.1 kWh
-	OffClusterTotalChargeLo = 10 // U32 low word
-	OffClusterTotalDischHi  = 11 // U32 high word, 0.1 kWh
-	OffClusterTotalDischLo  = 12 // U32 low word
-	OffClusterSessChargeHi  = 13 // U32 high word, 0.1 kWh (session)
-	OffClusterSessChargeLo  = 14 // U32 low word
-	OffClusterSessDischHi   = 15 // U32 high word, 0.1 kWh (session)
-	OffClusterSessDischLo   = 16 // U32 low word
-	OffClusterMaxChargePW   = 17 // U16, 0.1 kW
-	OffClusterMaxDischargePW = 18 // U16, 0.1 kW
-	OffClusterMaxChargeI    = 19 // U16, 0.1 A
-	OffClusterMaxDischargeI = 20 // U16, 0.1 A
+	OffClusterStatus          = 1  // 0-offline,1-standby,2-stopped,3-charging,4-discharging,5-running,6-fault
+	OffClusterSOC             = 2  // U16, 0.1 %
+	OffClusterSOH             = 3  // U16, 0.1 %
+	OffClusterRemainCharge    = 4  // U16, 0.1 kWh
+	OffClusterRemainDischarge = 5  // U16, 0.1 kWh
+	OffClusterVoltage         = 6  // U16, 0.1 V
+	OffClusterCurrent         = 7  // S16, 0.1 A
+	OffClusterPower           = 8  // S16, 0.1 kW
+	OffClusterTotalChargeHi   = 9  // U32 high word, 0.1 kWh
+	OffClusterTotalChargeLo   = 10 // U32 low word
+	OffClusterTotalDischHi    = 11 // U32 high word, 0.1 kWh
+	OffClusterTotalDischLo    = 12 // U32 low word
+	OffClusterSessChargeHi    = 13 // U32 high word, 0.1 kWh (session)
+	OffClusterSessChargeLo    = 14 // U32 low word
+	OffClusterSessDischHi     = 15 // U32 high word, 0.1 kWh (session)
+	OffClusterSessDischLo     = 16 // U32 low word
+	OffClusterMaxChargePW     = 17 // U16, 0.1 kW
+	OffClusterMaxDischargePW  = 18 // U16, 0.1 kW
+	OffClusterMaxChargeI      = 19 // U16, 0.1 A
+	OffClusterMaxDischargeI   = 20 // U16, 0.1 A
 )
 
 // clusterIR returns the absolute Input Register address for a given cluster index and offset.

@@ -84,9 +84,9 @@ func (b *BESS) processPCSControls() {
 // processPowerCommand reads the power command register and applies it.
 // Power command only takes effect when: PCS running + remote mode + BMS HV closed.
 func (b *BESS) processPowerCommand() {
+	cmdRaw := b.syncPowerCommandRegisters()
 	if b.pcsRunning && b.remoteMode && b.bmsHVClosed {
-		cmdRaw := uint16ToInt16(b.server.HoldingRegisters[RegPCSPowerCmd])
-		cmdPowerKW := float64(cmdRaw) * 0.1
+		cmdPowerKW := float64(uint16ToInt16(cmdRaw)) * 0.1
 
 		// Clamp to rated power
 		if cmdPowerKW > b.ratedPowerKW {
@@ -103,4 +103,25 @@ func (b *BESS) processPowerCommand() {
 	} else {
 		b.actualPowerKW = 0
 	}
+}
+
+func (b *BESS) syncPowerCommandRegisters() uint16 {
+	s := b.server
+	cmdRaw := s.HoldingRegisters[RegPCSPowerCmd]
+	aliasRaw := s.HoldingRegisters[RegPCSPowerCmdAlias]
+
+	cmdChanged := cmdRaw != b.lastPowerCmdRaw
+	aliasChanged := aliasRaw != b.lastPowerCmdAliasRaw
+
+	selected := cmdRaw
+	if aliasChanged && !cmdChanged {
+		selected = aliasRaw
+	}
+	// If both registers changed before this tick, keep the existing 30010 priority.
+
+	s.HoldingRegisters[RegPCSPowerCmd] = selected
+	s.HoldingRegisters[RegPCSPowerCmdAlias] = selected
+	b.lastPowerCmdRaw = selected
+	b.lastPowerCmdAliasRaw = selected
+	return selected
 }

@@ -21,18 +21,20 @@ type BESS struct {
 	gridVoltage       float64
 
 	// Dynamic state
-	currentEnergyKWh float64 // current stored energy in kWh
-	pcsRunning       bool    // PCS is started
-	bmsHVClosed      bool    // BMS high-voltage contactor closed
-	remoteMode       bool    // true=remote, false=local
-	gridTied         bool    // true=grid-tied, false=off-grid
-	actualPowerKW    float64 // current power: positive=charge, negative=discharge
-	clusterCount     int     // number of BMS clusters
+	currentEnergyKWh     float64 // current stored energy in kWh
+	pcsRunning           bool    // PCS is started
+	bmsHVClosed          bool    // BMS high-voltage contactor closed
+	remoteMode           bool    // true=remote, false=local
+	gridTied             bool    // true=grid-tied, false=off-grid
+	actualPowerKW        float64 // current power: positive=charge, negative=discharge
+	clusterCount         int     // number of BMS clusters
+	lastPowerCmdRaw      uint16  // last synchronized value of RegPCSPowerCmd
+	lastPowerCmdAliasRaw uint16  // last synchronized value of RegPCSPowerCmdAlias
 
 	// Cumulative energy tracking (kWh)
-	totalChargeKWh   float64 // lifetime cumulative charge energy
-	totalDischargeKWh float64 // lifetime cumulative discharge energy
-	sessionChargeKWh float64 // current session cumulative charge energy
+	totalChargeKWh      float64 // lifetime cumulative charge energy
+	totalDischargeKWh   float64 // lifetime cumulative discharge energy
+	sessionChargeKWh    float64 // current session cumulative charge energy
 	sessionDischargeKWh float64 // current session cumulative discharge energy
 
 	server   *mbserver.Server
