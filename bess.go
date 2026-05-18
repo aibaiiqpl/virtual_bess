@@ -19,6 +19,7 @@ type BESS struct {
 	soh               float64
 	batteryVoltageNom float64 // nominal DC voltage
 	gridVoltage       float64
+	pvRatedPowerKW    float64
 
 	// Dynamic state
 	currentEnergyKWh     float64 // current stored energy in kWh
@@ -37,13 +38,30 @@ type BESS struct {
 	sessionChargeKWh    float64 // current session cumulative charge energy
 	sessionDischargeKWh float64 // current session cumulative discharge energy
 
+	// PV state
+	pvRunning             bool
+	pvActualPowerKW       float64
+	pvTotalEnergyKWh      float64
+	pvDailyEnergyKWh      float64
+	pvMonthlyEnergyKWh    float64
+	pvYearlyEnergyKWh     float64
+	pvDailyPeakPowerKW    float64
+	pvLimitMode           pvLimitMode
+	lastPVPercentLimitRaw uint16
+	lastPVFixedLimitRaw   uint16
+	pvDayKey              int
+	pvMonthKey            int
+	pvYearKey             int
+
 	server   *mbserver.Server
 	lastTick time.Time
+	nowFunc  func() time.Time
 }
 
 // NewBESS creates a BESS instance, initializes default register values,
 // and syncs the initial state to modbus registers.
 func NewBESS(cfg *Config, server *mbserver.Server) *BESS {
+	now := time.Now()
 	initialEnergy := cfg.BESS.RatedCapacityKWh * cfg.BESS.InitialSOC / 100.0
 	b := &BESS{
 		ratedCapacityKWh:  cfg.BESS.RatedCapacityKWh,
@@ -51,19 +69,27 @@ func NewBESS(cfg *Config, server *mbserver.Server) *BESS {
 		soh:               cfg.BESS.SOH,
 		batteryVoltageNom: cfg.BESS.BatteryVoltage,
 		gridVoltage:       cfg.BESS.GridVoltage,
+		pvRatedPowerKW:    cfg.PV.RatedPowerKW,
 		currentEnergyKWh:  initialEnergy,
 		clusterCount:      cfg.BESS.ClusterCount,
 		remoteMode:        true,
 		gridTied:          true,
+		pvRunning:         true,
+		pvLimitMode:       pvLimitPercent,
 		server:            server,
-		lastTick:          time.Now(),
+		lastTick:          now,
+		nowFunc:           time.Now,
 	}
 
 	// Set default control register values
 	server.HoldingRegisters[RegPCSRemoteLocal] = 1 // remote
 	server.HoldingRegisters[RegPCSGridMode] = 0    // grid-tied
 	server.HoldingRegisters[RegPCSRunMode] = 2     // constant power
+	server.HoldingRegisters[RegPVPercentLimit] = 1000
+	b.lastPVPercentLimitRaw = 1000
 
+	b.registerPVWriteHandlers()
+	b.updatePVSimulation(now, 0)
 	b.syncRegisters()
 	return b
 }
@@ -73,14 +99,16 @@ func (b *BESS) Tick() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	now := time.Now()
+	now := b.nowFunc()
 	dt := now.Sub(b.lastTick).Seconds()
 	b.lastTick = now
 
 	b.processBMSControls()
 	b.processPCSControls()
 	b.processPowerCommand()
+	b.processPVControls()
 	b.updateSimulation(dt)
+	b.updatePVSimulation(now, dt)
 	b.syncRegisters()
 }
 

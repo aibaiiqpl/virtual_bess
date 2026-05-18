@@ -7,6 +7,9 @@ bess:
   grid_voltage: 220
   cluster_count: 1
 
+pv:
+  rated_power_kw: 120
+
 modbus:
   address: ":502"
 

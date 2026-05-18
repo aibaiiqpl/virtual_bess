@@ -16,6 +16,10 @@ type BESSConfig struct {
 	ClusterCount     int     `yaml:"cluster_count"`
 }
 
+type PVConfig struct {
+	RatedPowerKW float64 `yaml:"rated_power_kw"`
+}
+
 type ModbusConfig struct {
 	Address string `yaml:"address"`
 }
@@ -28,6 +32,7 @@ type LogConfig struct {
 
 type Config struct {
 	BESS   BESSConfig   `yaml:"bess"`
+	PV     PVConfig     `yaml:"pv"`
 	Modbus ModbusConfig `yaml:"modbus"`
 	Log    LogConfig    `yaml:"log"`
 }
@@ -42,6 +47,9 @@ func DefaultConfig() Config {
 			BatteryVoltage:   800,
 			GridVoltage:      220,
 			ClusterCount:     1,
+		},
+		PV: PVConfig{
+			RatedPowerKW: 120,
 		},
 		Modbus: ModbusConfig{
 			Address: ":502",

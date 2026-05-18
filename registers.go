@@ -31,6 +31,47 @@ const (
 	RegPCSPowerCmd      = 30010 // S16, 0.1kW, positive=charge, negative=discharge
 )
 
+// PV control registers (writable)
+const (
+	RegPVStartup      = 60000 // 1-start
+	RegPVShutdown     = 60001 // 1-shutdown
+	RegPVPercentLimit = 60002 // U16, 0.1%, 1000=100.0%
+	RegPVFixedLimit   = 60003 // U16, 0.1 kW
+)
+
+// PV status registers (read-only)
+const (
+	RegPVRunStatus          = 60100 // 1-stopped, 2-standby, 5-running
+	RegPVTotalEnergyHi      = 60140 // U32 high word, 1 kWh
+	RegPVTotalEnergyLo      = 60141
+	RegPVDailyEnergyHi      = 60142
+	RegPVDailyEnergyLo      = 60143
+	RegPVMonthlyEnergyHi    = 60144
+	RegPVMonthlyEnergyLo    = 60145
+	RegPVYearlyEnergyHi     = 60146
+	RegPVYearlyEnergyLo     = 60147
+	RegPVRatedPower         = 60148 // U16, 0.1 kW
+	RegPVFaultAlarm         = 60149 // U16
+	RegPVACVoltageA         = 60150 // U16, 0.1 V
+	RegPVACVoltageB         = 60151
+	RegPVACVoltageC         = 60152
+	RegPVACCurrentA         = 60153 // S16, 0.1 A
+	RegPVACCurrentB         = 60154
+	RegPVACCurrentC         = 60155
+	RegPVGridFrequency      = 60156 // U16, 0.01 Hz
+	RegPVPowerFactor        = 60157 // S16, 0.001
+	RegPVACActivePower      = 60158 // S16, 0.1 kW
+	RegPVACReactivePower    = 60159 // S16, 0.1 kW
+	RegPVInverterEfficiency = 60160 // U16, 0.1%
+	RegPVDailyPeakPower     = 60161 // S16, 0.1 kW
+	RegPVApparentPower      = 60162 // U16, 0.1 kVA
+
+	RegPVDCInputPower = 60280 // S16, 0.1 kW
+	RegPVInternalTemp = 60281 // S16, 0.1 °C
+	RegPVDCVoltage    = 60282 // U16, 0.1 V
+	RegPVDCCurrent    = 60283 // S16, 0.1 A
+)
+
 // PCS status registers (read-only)
 const (
 	RegPCSRemoteStatus = 30049 // 0-local, 1-remote

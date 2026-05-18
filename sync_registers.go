@@ -22,6 +22,7 @@ func (b *BESS) syncRegisters() {
 	b.syncBMSLimits(soc, batVoltage)
 	b.syncSystemStatus(powerKW) // after BMS limits, reads RegBMSMaxChargePW/DischargePW
 	b.syncClusterRegisters(soc, batVoltage, powerKW)
+	b.syncPVRegisters()
 }
 
 // syncSystemStatus updates system-level status registers (1-5, 100-102).
