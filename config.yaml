@@ -8,7 +8,13 @@ bess:
   cluster_count: 1
 
 pv:
-  rated_power_kw: 120
+  rated_power_kw: 120  # PV inverter rated AC output
+
+# Commercial/industrial load. Internal simulation only — its power flows into
+# the meter but is not exposed via Modbus. Curve has morning/evening peaks,
+# a lunch dip (11:30–13:30), and a night baseline.
+load:
+  rated_power_kw: 80
 
 modbus:
   address: ":502"

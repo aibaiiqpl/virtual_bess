@@ -53,6 +53,20 @@ type BESS struct {
 	pvMonthKey            int
 	pvYearKey             int
 
+	// Weather state (drives PV output coefficient)
+	weatherState  weatherState
+	weatherRemain float64
+	weatherCoeff  float64
+
+	// Load simulation (internal only, no Modbus)
+	loadRatedPowerKW  float64
+	loadActualPowerKW float64
+
+	// Meter state (point of common coupling)
+	meterForwardKWh float64
+	meterReverseKWh float64
+	meterGridPowerKW float64
+
 	server   *mbserver.Server
 	lastTick time.Time
 	nowFunc  func() time.Time
@@ -69,16 +83,17 @@ func NewBESS(cfg *Config, server *mbserver.Server) *BESS {
 		soh:               cfg.BESS.SOH,
 		batteryVoltageNom: cfg.BESS.BatteryVoltage,
 		gridVoltage:       cfg.BESS.GridVoltage,
-		pvRatedPowerKW:    cfg.PV.RatedPowerKW,
-		currentEnergyKWh:  initialEnergy,
-		clusterCount:      cfg.BESS.ClusterCount,
-		remoteMode:        true,
-		gridTied:          true,
-		pvRunning:         true,
-		pvLimitMode:       pvLimitPercent,
-		server:            server,
-		lastTick:          now,
-		nowFunc:           time.Now,
+		pvRatedPowerKW:   cfg.PV.RatedPowerKW,
+		loadRatedPowerKW: cfg.Load.RatedPowerKW,
+		currentEnergyKWh: initialEnergy,
+		clusterCount:     cfg.BESS.ClusterCount,
+		remoteMode:       true,
+		gridTied:         true,
+		pvRunning:        true,
+		pvLimitMode:      pvLimitPercent,
+		server:           server,
+		lastTick:         now,
+		nowFunc:          time.Now,
 	}
 
 	// Set default control register values
@@ -89,7 +104,10 @@ func NewBESS(cfg *Config, server *mbserver.Server) *BESS {
 	b.lastPVPercentLimitRaw = 1000
 
 	b.registerPVWriteHandlers()
+	b.initWeather()
+	b.updateLoad(now)
 	b.updatePVSimulation(now, 0)
+	b.updateMeter(0)
 	b.syncRegisters()
 	return b
 }
@@ -108,7 +126,10 @@ func (b *BESS) Tick() {
 	b.processPowerCommand()
 	b.processPVControls()
 	b.updateSimulation(dt)
+	b.updateWeather(dt)
+	b.updateLoad(now)
 	b.updatePVSimulation(now, dt)
+	b.updateMeter(dt)
 	b.syncRegisters()
 }
 

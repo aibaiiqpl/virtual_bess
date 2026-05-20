@@ -1,5 +1,7 @@
 package main
 
+import "aiwatt.net/ems/go-common/mbserver"
+
 // System-level status registers (read-only)
 const (
 	RegSysRunning        = 1   // 0-none, 1-running
@@ -165,6 +167,58 @@ const (
 	OffClusterMaxDischargeI   = 20 // U16, 0.1 A
 )
 
+// Meter status registers (read-only, point of common coupling)
+const (
+	RegMeterCombinedEnergyHi = 10010 // S32 hi, 0.01 kWh — combined active energy (forward+reverse)
+	RegMeterCombinedEnergyLo = 10011
+	RegMeterForwardEnergyHi  = 10012 // S32 hi, 0.01 kWh — import from grid
+	RegMeterForwardEnergyLo  = 10013
+	RegMeterReverseEnergyHi  = 10014 // S32 hi, 0.01 kWh — export to grid
+	RegMeterReverseEnergyLo  = 10015
+	RegMeterVoltageA         = 10016 // U16, 0.1 V
+	RegMeterVoltageB         = 10017
+	RegMeterVoltageC         = 10018
+	RegMeterCurrentAHi       = 10019 // S32 hi, 0.1 A
+	RegMeterCurrentALo       = 10020
+	RegMeterCurrentBHi       = 10021
+	RegMeterCurrentBLo       = 10022
+	RegMeterCurrentCHi       = 10023
+	RegMeterCurrentCLo       = 10024
+	RegMeterActivePWTotalHi  = 10025 // S32 hi, 0.001 kW
+	RegMeterActivePWTotalLo  = 10026
+	RegMeterActivePWAHi      = 10027
+	RegMeterActivePWALo      = 10028
+	RegMeterActivePWBHi      = 10029
+	RegMeterActivePWBLo      = 10030
+	RegMeterActivePWCHi      = 10031
+	RegMeterActivePWCLo      = 10032
+	RegMeterReactivePWTotalHi = 10033 // S32 hi, 0.001 kVar
+	RegMeterReactivePWTotalLo = 10034
+	RegMeterReactivePWAHi    = 10035
+	RegMeterReactivePWALo    = 10036
+	RegMeterReactivePWBHi    = 10037
+	RegMeterReactivePWBLo    = 10038
+	RegMeterReactivePWCHi    = 10039
+	RegMeterReactivePWCLo    = 10040
+	RegMeterApparentPWTotalHi = 10041 // S32 hi, 0.001 kVA
+	RegMeterApparentPWTotalLo = 10042
+	RegMeterApparentPWAHi    = 10043
+	RegMeterApparentPWALo    = 10044
+	RegMeterApparentPWBHi    = 10045
+	RegMeterApparentPWBLo    = 10046
+	RegMeterApparentPWCHi    = 10047
+	RegMeterApparentPWCLo    = 10048
+	RegMeterPFTotalHi        = 10049 // S32 hi, 0.001
+	RegMeterPFTotalLo        = 10050
+	RegMeterPFAHi            = 10051
+	RegMeterPFALo            = 10052
+	RegMeterPFBHi            = 10053
+	RegMeterPFBLo            = 10054
+	RegMeterPFCHi            = 10055
+	RegMeterPFCLo            = 10056
+	RegMeterFrequency        = 10057 // U16, 0.01 Hz
+)
+
 // clusterIR returns the absolute Input Register address for a given cluster index and offset.
 func clusterIR(clusterIdx int, offset uint16) uint16 {
 	return uint16(clusterIdx*IRClusterStride) + offset
@@ -183,4 +237,11 @@ func int16ToUint16(v int16) uint16 {
 // uint16ToInt16 converts a uint16 register value back to signed int16.
 func uint16ToInt16(v uint16) int16 {
 	return int16(v)
+}
+
+// writeS32Holding writes a signed 32-bit value to two consecutive holding registers (big-endian word order).
+func writeS32Holding(s *mbserver.Server, highReg uint16, value int32) {
+	u := uint32(value)
+	s.HoldingRegisters[highReg] = uint16(u >> 16)
+	s.HoldingRegisters[highReg+1] = uint16(u & 0xFFFF)
 }

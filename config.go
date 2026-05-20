@@ -20,6 +20,10 @@ type PVConfig struct {
 	RatedPowerKW float64 `yaml:"rated_power_kw"`
 }
 
+type LoadCfg struct {
+	RatedPowerKW float64 `yaml:"rated_power_kw"`
+}
+
 type ModbusConfig struct {
 	Address string `yaml:"address"`
 }
@@ -33,6 +37,7 @@ type LogConfig struct {
 type Config struct {
 	BESS   BESSConfig   `yaml:"bess"`
 	PV     PVConfig     `yaml:"pv"`
+	Load   LoadCfg      `yaml:"load"`
 	Modbus ModbusConfig `yaml:"modbus"`
 	Log    LogConfig    `yaml:"log"`
 }
@@ -50,6 +55,9 @@ func DefaultConfig() Config {
 		},
 		PV: PVConfig{
 			RatedPowerKW: 120,
+		},
+		Load: LoadCfg{
+			RatedPowerKW: 80,
 		},
 		Modbus: ModbusConfig{
 			Address: ":502",

@@ -138,14 +138,16 @@ func (b *BESS) pvNaturalPowerKW(now time.Time) float64 {
 	}
 
 	peak := b.pvRatedPowerKW * 0.9
+	var natural float64
 	switch {
 	case hour < 13:
-		return peak * (hour - 6) / 7
+		natural = peak * (hour - 6) / 7
 	case hour <= 15:
-		return peak
+		natural = peak
 	default:
-		return peak * (18 - hour) / 3
+		natural = peak * (18 - hour) / 3
 	}
+	return natural * b.weatherCoeff
 }
 
 func (b *BESS) pvActiveLimitKW() float64 {

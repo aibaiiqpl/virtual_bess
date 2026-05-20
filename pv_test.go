@@ -149,7 +149,9 @@ func TestPVRegisterSync(t *testing.T) {
 
 func newPVTestBESS() *BESS {
 	cfg := DefaultConfig()
-	return NewBESS(&cfg, mbserver.NewServer())
+	b := NewBESS(&cfg, mbserver.NewServer())
+	b.weatherCoeff = 1.0 // force clear-sky conditions for deterministic PV math
+	return b
 }
 
 func localTime(year int, month time.Month, day, hour, minute, second int) time.Time {
