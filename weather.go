@@ -72,33 +72,42 @@ func nextWeatherState(cur weatherState) weatherState {
 	return cur
 }
 
-func (b *BESS) initWeather() {
-	b.weatherState = weatherState(rand.Intn(4))
-	b.weatherRemain = weatherStateDuration(b.weatherState)
-	b.weatherCoeff = weatherBaseCoeff(b.weatherState)
-}
-
 // weatherSmoothingAlpha is the EMA factor applied each tick.
-// With 1-second ticks this yields ~30s state-transition rise time and damps
-// the per-tick random sample so cloud-shadow flutter stays in a realistic
-// 10–30 second timescale rather than jumping every second.
+// With 1-second ticks this yields ~30s state-transition rise time.
 const weatherSmoothingAlpha = 0.1
 
-func (b *BESS) updateWeather(dtSeconds float64) {
-	b.weatherRemain -= dtSeconds
-	if b.weatherRemain <= 0 {
-		b.weatherState = nextWeatherState(b.weatherState)
-		b.weatherRemain = weatherStateDuration(b.weatherState)
+// Weather 是所有 PV 共享的天气模型。
+type Weather struct {
+	state  weatherState
+	remain float64
+	coeff  float64
+}
+
+func NewWeather() *Weather {
+	w := &Weather{}
+	w.state = weatherState(rand.Intn(4))
+	w.remain = weatherStateDuration(w.state)
+	w.coeff = weatherBaseCoeff(w.state)
+	return w
+}
+
+func (w *Weather) Coeff() float64 { return w.coeff }
+
+func (w *Weather) Update(dtSeconds float64) {
+	w.remain -= dtSeconds
+	if w.remain <= 0 {
+		w.state = nextWeatherState(w.state)
+		w.remain = weatherStateDuration(w.state)
 	}
 
-	base := weatherBaseCoeff(b.weatherState)
-	amp := weatherAmplitude(b.weatherState)
+	base := weatherBaseCoeff(w.state)
+	amp := weatherAmplitude(w.state)
 	target := base + (rand.Float64()*2-1)*amp
 
-	b.weatherCoeff += (target - b.weatherCoeff) * weatherSmoothingAlpha
-	if b.weatherCoeff > 1 {
-		b.weatherCoeff = 1
-	} else if b.weatherCoeff < 0 {
-		b.weatherCoeff = 0
+	w.coeff += (target - w.coeff) * weatherSmoothingAlpha
+	if w.coeff > 1 {
+		w.coeff = 1
+	} else if w.coeff < 0 {
+		w.coeff = 0
 	}
 }

@@ -10,63 +10,82 @@ import (
 // of reactive power at the PCC is the load itself.
 const loadPowerFactor = 0.95
 
-func (b *BESS) updateMeter(dtSeconds float64) {
-	// Grid power at the point of common coupling (PCC):
-	//   positive = importing from grid, negative = exporting to grid
-	// BESS actualPowerKW: positive=charge (draws from grid), negative=discharge (injects)
-	// PV  pvActualPowerKW: always positive (injects)
-	// Load loadActualPowerKW: always positive (consumes)
-	b.meterGridPowerKW = b.loadActualPowerKW + b.actualPowerKW - b.pvActualPowerKW
+// Meter 是 PCC（公共连接点）的电表，唯一一台。
+// 它聚合所有 PCS / PV 的功率与单台负载，得到入网功率和能量。
+type Meter struct {
+	bank *SlaveBank
+
+	gridVoltage float64
+
+	// 当前 tick 输入
+	gridPowerKW   float64
+	loadPowerKW   float64
+
+	// 累计能量
+	forwardKWh float64
+	reverseKWh float64
+}
+
+func NewMeter(cfg MeterConfig, gridVoltage float64, bank *SlaveBank) *Meter {
+	_ = cfg
+	return &Meter{
+		bank:        bank,
+		gridVoltage: gridVoltage,
+	}
+}
+
+// Update 根据 load / ΣPCS / ΣPV 重新计算电表功率并累计能量。
+// 公约：gridPowerKW > 0 = 从电网买电；< 0 = 向电网卖电。
+//   PCS actualPowerKW: 正充负放（充电时从电网取电）
+//   PV  actualPowerKW: 永远 >= 0（注入）
+//   Load actualPowerKW: 永远 >= 0（消耗）
+func (m *Meter) Update(dtSeconds, loadPowerKW, totalPCSKW, totalPVKW float64) {
+	m.loadPowerKW = loadPowerKW
+	m.gridPowerKW = loadPowerKW + totalPCSKW - totalPVKW
 
 	if dtSeconds <= 0 {
 		return
 	}
-	deltaKWh := b.meterGridPowerKW * dtSeconds / 3600.0
+	deltaKWh := m.gridPowerKW * dtSeconds / 3600.0
 	if deltaKWh > 0 {
-		b.meterForwardKWh += deltaKWh
+		m.forwardKWh += deltaKWh
 	} else {
-		b.meterReverseKWh += -deltaKWh
+		m.reverseKWh += -deltaKWh
 	}
 }
 
-func (b *BESS) syncMeterRegisters() {
-	s := b.server
-	gridPowerKW := b.meterGridPowerKW
+func (m *Meter) Sync() {
+	gridPowerKW := m.gridPowerKW
 
-	// Reactive power: only the load contributes (PV/PCS at unity PF).
-	// Q_load = P_load × tan(arccos(PF)), always >= 0 (inductive).
+	// 无功只来自负载（PV/PCS 在 unity PF）；负载是感性的，Q >= 0
 	tanPhi := math.Sqrt(1-loadPowerFactor*loadPowerFactor) / loadPowerFactor
-	reactiveKVar := b.loadActualPowerKW * tanPhi
+	reactiveKVar := m.loadPowerKW * tanPhi
 
-	// Apparent power: S = √(P² + Q²)
 	apparentKVA := math.Sqrt(gridPowerKW*gridPowerKW + reactiveKVar*reactiveKVar)
 
-	// Power factor magnitude = |P|/S. Per GB/T 17215 sign convention,
-	// inductive (Q ≥ 0) → positive sign. Q is always ≥ 0 here, so PF ≥ 0.
+	// PF 幅值 = |P|/S；Q ≥ 0 → PF 符号为正
 	pfMag := 1.0
 	if apparentKVA > 0 {
 		pfMag = math.Abs(gridPowerKW) / apparentKVA
 	}
 
-	// Energy (S32, 0.01 kWh → ×100)
-	combinedKWh := b.meterForwardKWh + b.meterReverseKWh
-	writeS32Holding(s, RegMeterCombinedEnergyHi, int32(combinedKWh*100))
-	writeS32Holding(s, RegMeterForwardEnergyHi, int32(b.meterForwardKWh*100))
-	writeS32Holding(s, RegMeterReverseEnergyHi, int32(b.meterReverseKWh*100))
+	// 能量寄存器（S32, 0.01 kWh → ×100）
+	combinedKWh := m.forwardKWh + m.reverseKWh
+	m.bank.WriteS32(RegMeterCombinedEnergyHi, int32(combinedKWh*100))
+	m.bank.WriteS32(RegMeterForwardEnergyHi, int32(m.forwardKWh*100))
+	m.bank.WriteS32(RegMeterReverseEnergyHi, int32(m.reverseKWh*100))
 
-	// Voltage A/B/C (U16, 0.1 V) with ±0.5% jitter
+	// 三相电压 (U16, 0.1 V) ±0.5% jitter
 	phaseVoltages := [3]float64{}
 	phaseVoltRegs := [3]uint16{RegMeterVoltageA, RegMeterVoltageB, RegMeterVoltageC}
 	for i, reg := range phaseVoltRegs {
 		jitter := 1.0 + (rand.Float64()*0.01 - 0.005)
-		v := b.gridVoltage * jitter
+		v := m.gridVoltage * jitter
 		phaseVoltages[i] = v
-		s.HoldingRegisters[reg] = uint16(v * 10)
+		m.bank.WriteU16(reg, uint16(v*10))
 	}
 
-	// Current A/B/C (S32, 0.1 A → ×10):
-	//   magnitude follows apparent power: |I| = S_phase / V_phase
-	//   sign follows active power direction
+	// 三相电流 (S32, 0.1 A)：幅值跟视在功率，符号跟有功方向
 	phasePowerKW := gridPowerKW / 3.0
 	phaseApparentKVA := apparentKVA / 3.0
 	phaseCurrentHi := [3]uint16{RegMeterCurrentAHi, RegMeterCurrentBHi, RegMeterCurrentCHi}
@@ -80,38 +99,38 @@ func (b *BESS) syncMeterRegisters() {
 				currentA = mag
 			}
 		}
-		writeS32Holding(s, hiReg, int32(currentA*10))
+		m.bank.WriteS32(hiReg, int32(currentA*10))
 	}
 
-	// Active power total + per-phase (S32, 0.001 kW → ×1000)
-	writeS32Holding(s, RegMeterActivePWTotalHi, int32(gridPowerKW*1000))
+	// 有功 (S32, 0.001 kW)
+	m.bank.WriteS32(RegMeterActivePWTotalHi, int32(gridPowerKW*1000))
 	phasePW1000 := int32(phasePowerKW * 1000)
-	writeS32Holding(s, RegMeterActivePWAHi, phasePW1000)
-	writeS32Holding(s, RegMeterActivePWBHi, phasePW1000)
-	writeS32Holding(s, RegMeterActivePWCHi, phasePW1000)
+	m.bank.WriteS32(RegMeterActivePWAHi, phasePW1000)
+	m.bank.WriteS32(RegMeterActivePWBHi, phasePW1000)
+	m.bank.WriteS32(RegMeterActivePWCHi, phasePW1000)
 
-	// Reactive power total + per-phase (S32, 0.001 kVar → ×1000)
-	writeS32Holding(s, RegMeterReactivePWTotalHi, int32(reactiveKVar*1000))
+	// 无功 (S32, 0.001 kVar)
+	m.bank.WriteS32(RegMeterReactivePWTotalHi, int32(reactiveKVar*1000))
 	phaseReact1000 := int32(reactiveKVar / 3.0 * 1000)
-	writeS32Holding(s, RegMeterReactivePWAHi, phaseReact1000)
-	writeS32Holding(s, RegMeterReactivePWBHi, phaseReact1000)
-	writeS32Holding(s, RegMeterReactivePWCHi, phaseReact1000)
+	m.bank.WriteS32(RegMeterReactivePWAHi, phaseReact1000)
+	m.bank.WriteS32(RegMeterReactivePWBHi, phaseReact1000)
+	m.bank.WriteS32(RegMeterReactivePWCHi, phaseReact1000)
 
-	// Apparent power total + per-phase (S32, 0.001 kVA → ×1000)
-	writeS32Holding(s, RegMeterApparentPWTotalHi, int32(apparentKVA*1000))
+	// 视在 (S32, 0.001 kVA)
+	m.bank.WriteS32(RegMeterApparentPWTotalHi, int32(apparentKVA*1000))
 	phaseAppar1000 := int32(phaseApparentKVA * 1000)
-	writeS32Holding(s, RegMeterApparentPWAHi, phaseAppar1000)
-	writeS32Holding(s, RegMeterApparentPWBHi, phaseAppar1000)
-	writeS32Holding(s, RegMeterApparentPWCHi, phaseAppar1000)
+	m.bank.WriteS32(RegMeterApparentPWAHi, phaseAppar1000)
+	m.bank.WriteS32(RegMeterApparentPWBHi, phaseAppar1000)
+	m.bank.WriteS32(RegMeterApparentPWCHi, phaseAppar1000)
 
-	// Power factor (S32, 0.001): always non-negative (load is inductive)
+	// PF (S32, 0.001)；非负
 	pf1000 := int32(pfMag * 1000)
-	writeS32Holding(s, RegMeterPFTotalHi, pf1000)
-	writeS32Holding(s, RegMeterPFAHi, pf1000)
-	writeS32Holding(s, RegMeterPFBHi, pf1000)
-	writeS32Holding(s, RegMeterPFCHi, pf1000)
+	m.bank.WriteS32(RegMeterPFTotalHi, pf1000)
+	m.bank.WriteS32(RegMeterPFAHi, pf1000)
+	m.bank.WriteS32(RegMeterPFBHi, pf1000)
+	m.bank.WriteS32(RegMeterPFCHi, pf1000)
 
-	// Grid frequency: 50.00 ± 0.05 Hz random jitter
+	// 频率 50 ± 0.05 Hz
 	freqHz := 50.0 + (rand.Float64()*2-1)*0.05
-	s.HoldingRegisters[RegMeterFrequency] = uint16(freqHz * 100)
+	m.bank.WriteU16(RegMeterFrequency, uint16(freqHz*100))
 }

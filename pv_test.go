@@ -1,7 +1,6 @@
 package main
 
 import (
-	"math"
 	"testing"
 	"time"
 
@@ -9,7 +8,7 @@ import (
 )
 
 func TestPVNaturalPowerCurve(t *testing.T) {
-	b := newPVTestBESS()
+	pv := newTestPV(t)
 
 	tests := []struct {
 		name string
@@ -26,149 +25,137 @@ func TestPVNaturalPowerCurve(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := b.pvNaturalPowerKW(tt.at)
-			if math.Abs(got-tt.want) > 0.001 {
-				t.Fatalf("pvNaturalPowerKW() = %v, want %v", got, tt.want)
-			}
+			got := pv.naturalPowerKW(tt.at, 1.0) // 强制晴天系数
+			assertFloatNear(t, got, tt.want)
 		})
 	}
 }
 
 func TestPVControlsStartStop(t *testing.T) {
-	b := newPVTestBESS()
+	pv := newTestPV(t)
 	noon := localTime(2026, 5, 18, 13, 0, 0)
 
-	b.updatePVSimulation(noon, 1)
-	if b.pvActualPowerKW == 0 {
+	pv.UpdateSimulation(noon, 1, 1.0)
+	if pv.actualPowerKW == 0 {
 		t.Fatal("default PV state should be running")
 	}
 
-	b.server.HoldingRegisters[RegPVShutdown] = 1
-	b.processPVControls()
-	b.updatePVSimulation(noon, 1)
-	if b.pvActualPowerKW != 0 {
-		t.Fatalf("pvActualPowerKW after shutdown = %v, want 0", b.pvActualPowerKW)
+	pv.bank.WriteU16(RegPVShutdown, 1)
+	pv.ProcessControls()
+	pv.UpdateSimulation(noon, 1, 1.0)
+	if pv.actualPowerKW != 0 {
+		t.Fatalf("actualPowerKW after shutdown = %v, want 0", pv.actualPowerKW)
 	}
-	if got := b.server.HoldingRegisters[RegPVShutdown]; got != 0 {
+	if got := pv.bank.ReadU16(RegPVShutdown); got != 0 {
 		t.Fatalf("shutdown command register = %v, want 0", got)
 	}
 
-	b.server.HoldingRegisters[RegPVStartup] = 1
-	b.processPVControls()
-	b.updatePVSimulation(noon, 1)
-	if b.pvActualPowerKW == 0 {
+	pv.bank.WriteU16(RegPVStartup, 1)
+	pv.ProcessControls()
+	pv.UpdateSimulation(noon, 1, 1.0)
+	if pv.actualPowerKW == 0 {
 		t.Fatal("PV should resume generation after startup")
 	}
-	if got := b.server.HoldingRegisters[RegPVStartup]; got != 0 {
+	if got := pv.bank.ReadU16(RegPVStartup); got != 0 {
 		t.Fatalf("startup command register = %v, want 0", got)
 	}
 }
 
 func TestPVLatestLimitWins(t *testing.T) {
-	b := newPVTestBESS()
+	pv := newTestPV(t)
 	noon := localTime(2026, 5, 18, 13, 0, 0)
 
-	b.recordPVLimitWrite(RegPVPercentLimit, 500)
-	b.updatePVSimulation(noon, 1)
-	assertFloatNear(t, b.pvActualPowerKW, 60)
+	pv.OnPVWrite(RegPVPercentLimit, 500)
+	pv.UpdateSimulation(noon, 1, 1.0)
+	assertFloatNear(t, pv.actualPowerKW, 60)
 
-	b.recordPVLimitWrite(RegPVFixedLimit, 700)
-	b.updatePVSimulation(noon, 1)
-	assertFloatNear(t, b.pvActualPowerKW, 70)
+	pv.OnPVWrite(RegPVFixedLimit, 700)
+	pv.UpdateSimulation(noon, 1, 1.0)
+	assertFloatNear(t, pv.actualPowerKW, 70)
 
-	b.recordPVLimitWrite(RegPVPercentLimit, 250)
-	b.updatePVSimulation(noon, 1)
-	assertFloatNear(t, b.pvActualPowerKW, 30)
+	pv.OnPVWrite(RegPVPercentLimit, 250)
+	pv.UpdateSimulation(noon, 1, 1.0)
+	assertFloatNear(t, pv.actualPowerKW, 30)
 }
 
+// TestPVLimitWriteHandlersTrackLatestRegister 通过 Simulator 路由层模拟 modbus 写。
 func TestPVLimitWriteHandlersTrackLatestRegister(t *testing.T) {
-	b := newPVTestBESS()
+	sim := newTestSimulator(t)
+	pv := sim.pvs[0]
 	noon := localTime(2026, 5, 18, 13, 0, 0)
 
-	multiFrame := &mbserver.TCPFrame{Function: 16}
-	mbserver.SetDataWithRegisterAndNumberAndValues(multiFrame, RegPVPercentLimit, 2, []uint16{500, 700})
-	b.handleWriteHoldingRegisters(b.server, multiFrame)
-	b.updatePVSimulation(noon, 1)
-	assertFloatNear(t, b.pvActualPowerKW, 70)
+	// FC16 写 [60002,60003] = [500, 700] → 最后写的是 60003 (fixed)
+	multi := &mbserver.TCPFrame{Function: 16, Device: pv.bank.SlaveID}
+	mbserver.SetDataWithRegisterAndNumberAndValues(multi, RegPVPercentLimit, 2, []uint16{500, 700})
+	if _, exc := sim.handleWriteMultipleHolding(sim.server, multi); exc != &mbserver.Success {
+		t.Fatalf("write multiple failed: %v", exc)
+	}
+	pv.UpdateSimulation(noon, 1, 1.0)
+	assertFloatNear(t, pv.actualPowerKW, 70)
 
-	singleFrame := &mbserver.TCPFrame{Function: 6}
-	mbserver.SetDataWithRegisterAndNumber(singleFrame, RegPVPercentLimit, 250)
-	b.handleWriteHoldingRegister(b.server, singleFrame)
-	b.updatePVSimulation(noon, 1)
-	assertFloatNear(t, b.pvActualPowerKW, 30)
+	// FC6 写 60002 = 250 → 切回 percent 模式
+	single := &mbserver.TCPFrame{Function: 6, Device: pv.bank.SlaveID}
+	mbserver.SetDataWithRegisterAndNumber(single, RegPVPercentLimit, 250)
+	if _, exc := sim.handleWriteSingleHolding(sim.server, single); exc != &mbserver.Success {
+		t.Fatalf("write single failed: %v", exc)
+	}
+	pv.UpdateSimulation(noon, 1, 1.0)
+	assertFloatNear(t, pv.actualPowerKW, 30)
 }
 
 func TestPVRegisterSync(t *testing.T) {
-	b := newPVTestBESS()
-	b.pvActualPowerKW = 90
-	b.pvTotalEnergyKWh = 70000
-	b.pvDailyEnergyKWh = 123
-	b.pvMonthlyEnergyKWh = 456
-	b.pvYearlyEnergyKWh = 789
-	b.pvDailyPeakPowerKW = 100
+	pv := newTestPV(t)
+	pv.actualPowerKW = 90
+	pv.totalEnergyKWh = 70000
+	pv.dailyEnergyKWh = 123
+	pv.monthlyEnergyKWh = 456
+	pv.yearlyEnergyKWh = 789
+	pv.dailyPeakPowerKW = 100
+	pv.running = true
 
-	b.syncPVRegisters()
-	s := b.server.HoldingRegisters
+	pv.Sync()
+	b := pv.bank
 
-	assertU32Register(t, s, RegPVTotalEnergyHi, 70000)
-	assertU32Register(t, s, RegPVDailyEnergyHi, 123)
-	assertU32Register(t, s, RegPVMonthlyEnergyHi, 456)
-	assertU32Register(t, s, RegPVYearlyEnergyHi, 789)
-
-	if got := s[RegPVRunStatus]; got != 5 {
+	if got := readU32Bank(b.Holding, RegPVTotalEnergyHi); got != 70000 {
+		t.Fatalf("RegPVTotalEnergy = %v, want 70000", got)
+	}
+	if got := readU32Bank(b.Holding, RegPVDailyEnergyHi); got != 123 {
+		t.Fatalf("RegPVDailyEnergy = %v, want 123", got)
+	}
+	if got := readU32Bank(b.Holding, RegPVMonthlyEnergyHi); got != 456 {
+		t.Fatalf("RegPVMonthlyEnergy = %v, want 456", got)
+	}
+	if got := readU32Bank(b.Holding, RegPVYearlyEnergyHi); got != 789 {
+		t.Fatalf("RegPVYearlyEnergy = %v, want 789", got)
+	}
+	if got := b.ReadU16(RegPVRunStatus); got != 5 {
 		t.Fatalf("RegPVRunStatus = %v, want 5", got)
 	}
-	if got := s[RegPVRatedPower]; got != 1200 {
+	if got := b.ReadU16(RegPVRatedPower); got != 1200 {
 		t.Fatalf("RegPVRatedPower = %v, want 1200", got)
 	}
-	if got := s[RegPVGridFrequency]; got != 5000 {
+	if got := b.ReadU16(RegPVGridFrequency); got != 5000 {
 		t.Fatalf("RegPVGridFrequency = %v, want 5000", got)
 	}
-	if got := uint16ToInt16(s[RegPVPowerFactor]); got != 1000 {
+	if got := uint16ToInt16(b.ReadU16(RegPVPowerFactor)); got != 1000 {
 		t.Fatalf("RegPVPowerFactor = %v, want 1000", got)
 	}
-	if got := uint16ToInt16(s[RegPVACActivePower]); got != 900 {
+	if got := uint16ToInt16(b.ReadU16(RegPVACActivePower)); got != 900 {
 		t.Fatalf("RegPVACActivePower = %v, want 900", got)
 	}
-	if got := s[RegPVInverterEfficiency]; got != 980 {
+	if got := b.ReadU16(RegPVInverterEfficiency); got != 980 {
 		t.Fatalf("RegPVInverterEfficiency = %v, want 980", got)
 	}
-	if got := uint16ToInt16(s[RegPVDailyPeakPower]); got != 1000 {
+	if got := uint16ToInt16(b.ReadU16(RegPVDailyPeakPower)); got != 1000 {
 		t.Fatalf("RegPVDailyPeakPower = %v, want 1000", got)
 	}
-	if got := s[RegPVDCVoltage]; got != 8000 {
+	if got := b.ReadU16(RegPVDCVoltage); got != 8000 {
 		t.Fatalf("RegPVDCVoltage = %v, want 8000", got)
 	}
-	if got := s[RegPVACVoltageA]; got == 0 {
+	if got := b.ReadU16(RegPVACVoltageA); got == 0 {
 		t.Fatal("RegPVACVoltageA should be non-zero")
 	}
-	if got := uint16ToInt16(s[RegPVACCurrentA]); got == 0 {
+	if got := uint16ToInt16(b.ReadU16(RegPVACCurrentA)); got == 0 {
 		t.Fatal("RegPVACCurrentA should be non-zero")
-	}
-}
-
-func newPVTestBESS() *BESS {
-	cfg := DefaultConfig()
-	b := NewBESS(&cfg, mbserver.NewServer())
-	b.weatherCoeff = 1.0 // force clear-sky conditions for deterministic PV math
-	return b
-}
-
-func localTime(year int, month time.Month, day, hour, minute, second int) time.Time {
-	return time.Date(year, month, day, hour, minute, second, 0, time.Local)
-}
-
-func assertFloatNear(t *testing.T, got, want float64) {
-	t.Helper()
-	if math.Abs(got-want) > 0.001 {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-}
-
-func assertU32Register(t *testing.T, registers []uint16, highRegister uint16, want uint32) {
-	t.Helper()
-	got := uint32(registers[highRegister])<<16 | uint32(registers[highRegister+1])
-	if got != want {
-		t.Fatalf("U32 register %d = %v, want %v", highRegister, got, want)
 	}
 }

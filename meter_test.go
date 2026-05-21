@@ -3,43 +3,13 @@ package main
 import (
 	"math"
 	"testing"
-
-	"aiwatt.net/ems/go-common/mbserver"
 )
-
-func newMeterTestBESS() *BESS {
-	cfg := DefaultConfig()
-	b := NewBESS(&cfg, mbserver.NewServer())
-	b.weatherCoeff = 1.0
-	b.pvActualPowerKW = 0
-	b.loadActualPowerKW = 0
-	b.actualPowerKW = 0
-	b.meterForwardKWh = 0
-	b.meterReverseKWh = 0
-	return b
-}
-
-func readS32(regs []uint16, hi uint16) int32 {
-	return int32(uint32(regs[hi])<<16 | uint32(regs[hi+1]))
-}
-
-func TestS32Roundtrip(t *testing.T) {
-	server := mbserver.NewServer()
-	cases := []int32{0, 1, -1, 12345, -12345, math.MaxInt32, math.MinInt32}
-	for _, v := range cases {
-		writeS32Holding(server, 100, v)
-		got := readS32(server.HoldingRegisters, 100)
-		if got != v {
-			t.Errorf("S32 roundtrip: wrote %v, got %v", v, got)
-		}
-	}
-}
 
 func TestMeterGridPowerSign(t *testing.T) {
 	tests := []struct {
-		name string
+		name           string
 		load, pv, bess float64
-		want float64
+		want           float64
 	}{
 		{"pure load import", 50, 0, 0, 50},
 		{"pv covers load", 30, 30, 0, 0},
@@ -50,49 +20,42 @@ func TestMeterGridPowerSign(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			b := newMeterTestBESS()
-			b.loadActualPowerKW = tc.load
-			b.pvActualPowerKW = tc.pv
-			b.actualPowerKW = tc.bess
-			b.updateMeter(0)
-			if math.Abs(b.meterGridPowerKW-tc.want) > 0.001 {
-				t.Errorf("gridPowerKW = %v, want %v", b.meterGridPowerKW, tc.want)
+			m := newTestMeter(t)
+			m.forwardKWh, m.reverseKWh = 0, 0
+			m.Update(0, tc.load, tc.bess, tc.pv)
+			if math.Abs(m.gridPowerKW-tc.want) > 0.001 {
+				t.Errorf("gridPowerKW = %v, want %v", m.gridPowerKW, tc.want)
 			}
 		})
 	}
 }
 
 func TestMeterEnergyAccumulation(t *testing.T) {
-	b := newMeterTestBESS()
+	m := newTestMeter(t)
+	m.forwardKWh, m.reverseKWh = 0, 0
 
 	// 60 kW import for 1 hour → 60 kWh forward
-	b.loadActualPowerKW = 60
-	b.updateMeter(3600)
-	if math.Abs(b.meterForwardKWh-60) > 0.001 {
-		t.Errorf("forward energy after 1h@60kW import = %v, want 60", b.meterForwardKWh)
+	m.Update(3600, 60, 0, 0)
+	if math.Abs(m.forwardKWh-60) > 0.001 {
+		t.Errorf("forward energy after 1h@60kW import = %v, want 60", m.forwardKWh)
 	}
-	if b.meterReverseKWh != 0 {
-		t.Errorf("reverse should still be 0, got %v", b.meterReverseKWh)
+	if m.reverseKWh != 0 {
+		t.Errorf("reverse should still be 0, got %v", m.reverseKWh)
 	}
 
-	// Switch to 40 kW export for 30 min → 20 kWh reverse
-	b.loadActualPowerKW = 0
-	b.pvActualPowerKW = 40
-	b.updateMeter(1800)
-	if math.Abs(b.meterReverseKWh-20) > 0.001 {
-		t.Errorf("reverse energy after 30m@40kW export = %v, want 20", b.meterReverseKWh)
+	// 40 kW export for 30 min → 20 kWh reverse
+	m.Update(1800, 0, 0, 40)
+	if math.Abs(m.reverseKWh-20) > 0.001 {
+		t.Errorf("reverse energy after 30m@40kW export = %v, want 20", m.reverseKWh)
 	}
-	if math.Abs(b.meterForwardKWh-60) > 0.001 {
-		t.Errorf("forward should remain 60, got %v", b.meterForwardKWh)
+	if math.Abs(m.forwardKWh-60) > 0.001 {
+		t.Errorf("forward should remain 60, got %v", m.forwardKWh)
 	}
 }
 
 func TestMeterPFAlwaysPositive(t *testing.T) {
-	// GB/T 17215: PF sign indicates inductive(+)/capacitive(-).
-	// Load is inductive in our model, so PF must be >= 0 regardless of
-	// active power direction.
 	cases := []struct {
-		name string
+		name           string
 		load, pv, bess float64
 	}{
 		{"import", 50, 0, 0},
@@ -102,13 +65,10 @@ func TestMeterPFAlwaysPositive(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			b := newMeterTestBESS()
-			b.loadActualPowerKW = tc.load
-			b.pvActualPowerKW = tc.pv
-			b.actualPowerKW = tc.bess
-			b.updateMeter(0)
-			b.syncMeterRegisters()
-			pf := readS32(b.server.HoldingRegisters, RegMeterPFTotalHi)
+			m := newTestMeter(t)
+			m.Update(0, tc.load, tc.bess, tc.pv)
+			m.Sync()
+			pf := readS32Bank(m.bank.Holding, RegMeterPFTotalHi)
 			if pf < 0 {
 				t.Errorf("PF = %v, expected >= 0 (inductive)", pf)
 			}
@@ -121,12 +81,11 @@ func TestMeterPFAlwaysPositive(t *testing.T) {
 
 func TestMeterApparentPowerCorrect(t *testing.T) {
 	// S = √(P² + Q²) where Q = P_load × tan(arccos(0.95))
-	b := newMeterTestBESS()
-	b.loadActualPowerKW = 100 // gives Q ≈ 32.87 kVar
-	b.updateMeter(0)
-	b.syncMeterRegisters()
+	m := newTestMeter(t)
+	m.Update(0, 100, 0, 0)
+	m.Sync()
 
-	apparent := float64(readS32(b.server.HoldingRegisters, RegMeterApparentPWTotalHi)) / 1000.0
+	apparent := float64(readS32Bank(m.bank.Holding, RegMeterApparentPWTotalHi)) / 1000.0
 	tanPhi := math.Sqrt(1-0.95*0.95) / 0.95
 	q := 100 * tanPhi
 	wantS := math.Sqrt(100*100 + q*q)
@@ -136,34 +95,31 @@ func TestMeterApparentPowerCorrect(t *testing.T) {
 }
 
 func TestMeterCurrentSignFollowsActivePower(t *testing.T) {
-	b := newMeterTestBESS()
-
 	// Import: current positive
-	b.loadActualPowerKW = 50
-	b.updateMeter(0)
-	b.syncMeterRegisters()
-	iA := readS32(b.server.HoldingRegisters, RegMeterCurrentAHi)
+	m := newTestMeter(t)
+	m.Update(0, 50, 0, 0)
+	m.Sync()
+	iA := readS32Bank(m.bank.Holding, RegMeterCurrentAHi)
 	if iA <= 0 {
 		t.Errorf("import current A = %v, want > 0", iA)
 	}
 
 	// Export: current negative
-	b = newMeterTestBESS()
-	b.pvActualPowerKW = 50
-	b.updateMeter(0)
-	b.syncMeterRegisters()
-	iA = readS32(b.server.HoldingRegisters, RegMeterCurrentAHi)
+	m = newTestMeter(t)
+	m.Update(0, 0, 0, 50)
+	m.Sync()
+	iA = readS32Bank(m.bank.Holding, RegMeterCurrentAHi)
 	if iA >= 0 {
 		t.Errorf("export current A = %v, want < 0", iA)
 	}
 }
 
 func TestMeterFrequencyJitter(t *testing.T) {
-	b := newMeterTestBESS()
+	m := newTestMeter(t)
 	seen := map[uint16]bool{}
 	for i := 0; i < 100; i++ {
-		b.syncMeterRegisters()
-		seen[b.server.HoldingRegisters[RegMeterFrequency]] = true
+		m.Sync()
+		seen[m.bank.ReadU16(RegMeterFrequency)] = true
 	}
 	if len(seen) < 3 {
 		t.Errorf("frequency does not vary, only saw values: %v", seen)
@@ -177,11 +133,47 @@ func TestMeterFrequencyJitter(t *testing.T) {
 }
 
 func TestMeterDtNegativeIgnored(t *testing.T) {
-	b := newMeterTestBESS()
-	b.loadActualPowerKW = 100
-	b.updateMeter(-1)
-	if b.meterForwardKWh != 0 || b.meterReverseKWh != 0 {
-		t.Errorf("negative dt should not accumulate: fwd=%v rev=%v",
-			b.meterForwardKWh, b.meterReverseKWh)
+	m := newTestMeter(t)
+	m.forwardKWh, m.reverseKWh = 0, 0
+	m.Update(-1, 100, 0, 0)
+	if m.forwardKWh != 0 || m.reverseKWh != 0 {
+		t.Errorf("negative dt should not accumulate: fwd=%v rev=%v", m.forwardKWh, m.reverseKWh)
+	}
+}
+
+// TestSimulatorAggregatesMultiplePCSAndPV 验证多套电池+多套 PV 在电表处正确聚合。
+func TestSimulatorAggregatesMultiplePCSAndPV(t *testing.T) {
+	cfg := Config{
+		Modbus: ModbusConfig{Address: ""},
+		Grid:   GridConfig{Voltage: 220},
+		BatteryUnits: []BatteryUnitConfig{
+			{PCSSlaveID: 1, BMSSlaveID: 11, RatedCapacityKWh: 100, RatedPowerKW: 50, InitialSOC: 50, SOH: 100, BatteryVoltage: 800, ClusterCount: 1},
+			{PCSSlaveID: 2, BMSSlaveID: 12, RatedCapacityKWh: 100, RatedPowerKW: 50, InitialSOC: 50, SOH: 100, BatteryVoltage: 800, ClusterCount: 1},
+		},
+		PVUnits: []PVUnitConfig{
+			{SlaveID: 21, RatedPowerKW: 30},
+			{SlaveID: 22, RatedPowerKW: 30},
+		},
+		Meter: MeterConfig{SlaveID: 31},
+		Load:  LoadCfg{RatedPowerKW: 80},
+	}
+	cfg.applyDefaults()
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("config invalid: %v", err)
+	}
+
+	sim := NewSimulator(&cfg, mustNewServer())
+
+	// 强制各 unit 的功率以便确定性聚合
+	sim.batteries[0].actualPowerKW = 10
+	sim.batteries[1].actualPowerKW = -5
+	sim.pvs[0].actualPowerKW = 12
+	sim.pvs[1].actualPowerKW = 8
+	sim.load.actualPowerKW = 30
+
+	sim.updateMeter(0)
+	want := 30.0 + (10.0 + -5.0) - (12.0 + 8.0) // = 15
+	if math.Abs(sim.meter.gridPowerKW-want) > 0.001 {
+		t.Fatalf("meter gridPower = %v, want %v", sim.meter.gridPowerKW, want)
 	}
 }

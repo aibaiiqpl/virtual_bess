@@ -6,21 +6,33 @@ import (
 	"time"
 )
 
-func (b *BESS) updateLoad(now time.Time) {
+// Load 是单台商业/工业负载的内部模拟（不暴露到 modbus）。
+type Load struct {
+	ratedPowerKW  float64
+	actualPowerKW float64
+}
+
+func NewLoad(ratedPowerKW float64) *Load {
+	return &Load{ratedPowerKW: ratedPowerKW}
+}
+
+func (l *Load) ActualPowerKW() float64 { return l.actualPowerKW }
+
+func (l *Load) Update(now time.Time) {
 	hour := float64(now.Hour()) +
 		float64(now.Minute())/60.0 +
 		float64(now.Second())/3600.0
 
 	base := loadBaseRatio(hour)
 	noise := 1.0 + (rand.Float64()*0.10 - 0.05)
-	b.loadActualPowerKW = b.loadRatedPowerKW * base * noise
+	l.actualPowerKW = l.ratedPowerKW * base * noise
 }
 
 // loadBaseRatio returns a normalized [0,1] load ratio for commercial/industrial load:
 //   - Night baseline (0–6h, 23–24h): ~22%
 //   - Morning ramp (6–8h): rises to ~85%
 //   - Morning peak (8–11.5h): ~88–93%
-//   - Lunch dip (11.5–13.5h, center 12.5h): ~52%  — above night but below peaks
+//   - Lunch dip (11.5–13.5h, center 12.5h): ~52%
 //   - Afternoon peak (13.5–18h): ~85–92%
 //   - Evening peak (18–21h): ~90–95%
 //   - Ramp down (21–23h): returns to baseline

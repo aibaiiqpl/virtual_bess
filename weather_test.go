@@ -31,12 +31,11 @@ func TestWeatherBaseCoeffOrdering(t *testing.T) {
 }
 
 func TestWeatherCoeffStaysBounded(t *testing.T) {
-	b := &BESS{}
-	b.initWeather()
+	w := NewWeather()
 	for i := 0; i < 5000; i++ {
-		b.updateWeather(1.0)
-		if b.weatherCoeff < 0 || b.weatherCoeff > 1 {
-			t.Fatalf("weatherCoeff out of [0,1] at tick %d: %v", i, b.weatherCoeff)
+		w.Update(1.0)
+		if w.coeff < 0 || w.coeff > 1 {
+			t.Fatalf("weatherCoeff out of [0,1] at tick %d: %v", i, w.coeff)
 		}
 	}
 }
@@ -44,27 +43,26 @@ func TestWeatherCoeffStaysBounded(t *testing.T) {
 func TestWeatherInitialStateNotAlwaysFixed(t *testing.T) {
 	seen := map[weatherState]bool{}
 	for i := 0; i < 200 && len(seen) < 2; i++ {
-		b := &BESS{}
-		b.initWeather()
-		seen[b.weatherState] = true
+		w := NewWeather()
+		seen[w.state] = true
 	}
 	if len(seen) < 2 {
-		t.Errorf("initWeather appears deterministic, only saw state: %v", seen)
+		t.Errorf("NewWeather appears deterministic, only saw state: %v", seen)
 	}
 }
 
 func TestWeatherSmoothingDampensSwings(t *testing.T) {
 	// Force a large state change and verify the coefficient doesn't jump in one tick.
-	b := &BESS{}
-	b.weatherState = weatherSunny
-	b.weatherRemain = 9999
-	b.weatherCoeff = weatherBaseCoeff(weatherSunny) // ~0.97
-
-	b.weatherState = weatherRainy // simulate transition; target is ~0.08
-	b.updateWeather(1.0)
+	w := &Weather{
+		state:  weatherSunny,
+		remain: 9999,
+		coeff:  weatherBaseCoeff(weatherSunny), // ~0.97
+	}
+	w.state = weatherRainy // simulate transition; target is ~0.08
+	w.Update(1.0)
 
 	// One tick should move ~10% toward target (alpha=0.1), not all the way.
-	if b.weatherCoeff < 0.5 {
-		t.Errorf("weatherCoeff jumped too fast: %v (expected gradual EMA transition)", b.weatherCoeff)
+	if w.coeff < 0.5 {
+		t.Errorf("weatherCoeff jumped too fast: %v (expected gradual EMA transition)", w.coeff)
 	}
 }
