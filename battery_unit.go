@@ -52,12 +52,17 @@ func NewBatteryUnit(cfg BatteryUnitConfig, gridVoltage float64, pcs, bms *SlaveB
 		currentEnergyKWh:  cfg.RatedCapacityKWh * cfg.InitialSOC / 100.0,
 		remoteMode:        true,
 		gridTied:          true,
+		bmsHVClosed:       true,
+		pcsRunning:        true,
 	}
 
 	// 默认控制寄存器值
 	pcs.WriteU16(RegPCSRemoteLocal, 1) // remote
 	pcs.WriteU16(RegPCSGridMode, 0)    // grid-tied
 	pcs.WriteU16(RegPCSRunMode, 2)     // constant power
+
+	zaplog.Infof("BMS[%d] HV contactor closed (auto startup)", bms.SlaveID)
+	zaplog.Infof("PCS[%d] started (auto startup)", pcs.SlaveID)
 
 	return bu
 }

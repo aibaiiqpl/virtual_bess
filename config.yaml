@@ -15,11 +15,35 @@ battery_units:
     soh: 100.0
     battery_voltage: 800
     cluster_count: 1
+  - pcs_slave_id: 2
+    bms_slave_id: 12
+    rated_capacity_kwh: 261
+    rated_power_kw: 120
+    initial_soc: 50.0
+    soh: 100.0
+    battery_voltage: 800
+    cluster_count: 1
+  - pcs_slave_id: 3
+    bms_slave_id: 13
+    rated_capacity_kwh: 261
+    rated_power_kw: 120
+    initial_soc: 70.0
+    soh: 100.0
+    battery_voltage: 800
+    cluster_count: 1
 
 # 光伏逆变器，每台一个 slave。所有 PV 共用同一份天气模型，
 # 输出会一起注入到唯一的电表。
 pv_units:
   - slave_id: 21
+    rated_power_kw: 120
+  - slave_id: 22
+    rated_power_kw: 120
+  - slave_id: 23
+    rated_power_kw: 120
+  - slave_id: 24
+    rated_power_kw: 120
+  - slave_id: 25
     rated_power_kw: 120
 
 # 唯一的电表（PCC 点），汇总所有 PCS / PV / Load 的功率。
