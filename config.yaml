@@ -1,23 +1,35 @@
-bess:
-  rated_capacity_kwh: 261
-  rated_power_kw: 120
-  initial_soc: 30.0
-  soh: 100.0
-  battery_voltage: 800
-  grid_voltage: 220
-  cluster_count: 1
-
-pv:
-  rated_power_kw: 120  # PV inverter rated AC output
-
-# Commercial/industrial load. Internal simulation only — its power flows into
-# the meter but is not exposed via Modbus. Curve has morning/evening peaks,
-# a lunch dip (11:30–13:30), and a night baseline.
-load:
-  rated_power_kw: 80
-
 modbus:
   address: ":502"
+
+grid:
+  voltage: 220                 # 共享电网相电压 V，电表/PCS/PV 都用它
+
+# 电池单元，每套 = 1 PCS slave + 1 BMS slave，紧密耦合。
+# 至少配置 1 套。每套可独立设置容量、功率、SOC 等。
+battery_units:
+  - pcs_slave_id: 1
+    bms_slave_id: 11
+    rated_capacity_kwh: 261
+    rated_power_kw: 120
+    initial_soc: 30.0
+    soh: 100.0
+    battery_voltage: 800
+    cluster_count: 1
+
+# 光伏逆变器，每台一个 slave。所有 PV 共用同一份天气模型，
+# 输出会一起注入到唯一的电表。
+pv_units:
+  - slave_id: 21
+    rated_power_kw: 120
+
+# 唯一的电表（PCC 点），汇总所有 PCS / PV / Load 的功率。
+meter:
+  slave_id: 31
+
+# 唯一的商业/工业负载，纯内部模拟，不暴露 modbus。
+# 曲线含早晚高峰、午间凹陷与夜间低基线。
+load:
+  rated_power_kw: 80
 
 log:
   file: "logs/virtual_bess.log"

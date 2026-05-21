@@ -22,12 +22,10 @@ func main() {
 		panic("failed to load config: " + err.Error())
 	}
 
-	// CLI port flag overrides config
 	if *port > 0 {
 		cfg.Modbus.Address = fmt.Sprintf(":%d", *port)
 	}
 
-	// Initialize logger: console-only when no log file configured
 	if cfg.Log.File != "" {
 		zaplog.InitZapLogger(cfg.Log.Console, cfg.Log.File, cfg.Log.Level)
 	} else {
@@ -35,8 +33,8 @@ func main() {
 	}
 	defer zaplog.Defer()
 
-	zaplog.Infof("starting virtual BESS, capacity=%.1f kWh, power=%.1f kW, clusters=%d",
-		cfg.BESS.RatedCapacityKWh, cfg.BESS.RatedPowerKW, cfg.BESS.ClusterCount)
+	zaplog.Infof("starting virtual BESS: %d battery_unit(s), %d pv_unit(s), meter slave %d",
+		len(cfg.BatteryUnits), len(cfg.PVUnits), cfg.Meter.SlaveID)
 
 	server := mbserver.NewServer()
 	if err := server.ListenTCP(cfg.Modbus.Address); err != nil {
@@ -45,9 +43,8 @@ func main() {
 	}
 	zaplog.Infof("modbus TCP server listening on %s", cfg.Modbus.Address)
 
-	bess := NewBESS(cfg, server)
+	sim := NewSimulator(cfg, server)
 
-	// Simulation loop: tick every second
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
@@ -57,7 +54,7 @@ func main() {
 	for {
 		select {
 		case <-ticker.C:
-			bess.Tick()
+			sim.Tick()
 		case sig := <-sigCh:
 			zaplog.Infof("received signal %v, shutting down", sig)
 			server.Close()
