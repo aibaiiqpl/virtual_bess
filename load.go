@@ -8,13 +8,16 @@ import (
 
 // Load 是单台商业/工业负载的内部模拟（不暴露到 modbus）。
 type Load struct {
+	name          string
 	ratedPowerKW  float64
 	actualPowerKW float64
 }
 
-func NewLoad(ratedPowerKW float64) *Load {
-	return &Load{ratedPowerKW: ratedPowerKW}
+func NewLoad(name string, ratedPowerKW float64) *Load {
+	return &Load{name: name, ratedPowerKW: ratedPowerKW}
 }
+
+func (l *Load) Name() string { return l.name }
 
 func (l *Load) ActualPowerKW() float64 { return l.actualPowerKW }
 

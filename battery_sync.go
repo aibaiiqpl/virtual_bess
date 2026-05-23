@@ -19,8 +19,50 @@ func (bu *BatteryUnit) Sync() {
 	bu.syncBMSStatus(soc, powerKW)
 	bu.syncBMSEnergy(soc, batVoltage, powerKW)
 	bu.syncBMSLimits(soc, batVoltage)
+	bu.syncBMSCellStats(batVoltage)
 	bu.syncSystemStatus(powerKW)
 	bu.syncClusterRegisters(soc, batVoltage, powerKW)
+}
+
+// syncBMSCellStats 写最高/最低/平均单体电压与温度，以及极差。
+// 单体平均电压由 SOC 在 2.8V ~ 3.6V 间线性插值；温度围绕 30°C 抖动。
+func (bu *BatteryUnit) syncBMSCellStats(_ float64) {
+	cellCount := bu.cellCount()
+
+	avgV := bu.cellAvgVoltage()
+	spreadV := avgV * (0.003 + rand.Float64()*0.003) // 0.3% ~ 0.6% 极差
+	maxV := avgV + spreadV/2
+	minV := avgV - spreadV/2
+
+	avgT := 30.0 + (rand.Float64()*2 - 1)
+	spreadT := 1.5 + rand.Float64()*1.5 // 1.5°C ~ 3.0°C 极差
+	maxT := avgT + spreadT/2
+	minT := avgT - spreadT/2
+
+	// 编号 1..cellCount，每 tick 抽签一次
+	maxVIdx := uint16(rand.Intn(cellCount) + 1)
+	minVIdx := uint16(rand.Intn(cellCount) + 1)
+	if minVIdx == maxVIdx {
+		minVIdx = uint16((int(maxVIdx)%cellCount) + 1)
+	}
+	maxTIdx := uint16(rand.Intn(cellCount) + 1)
+	minTIdx := uint16(rand.Intn(cellCount) + 1)
+	if minTIdx == maxTIdx {
+		minTIdx = uint16((int(maxTIdx)%cellCount) + 1)
+	}
+
+	bu.bms.WriteU16(RegBMSCellVMax, uint16(maxV*1000))
+	bu.bms.WriteU16(RegBMSCellVMaxIdx, maxVIdx)
+	bu.bms.WriteU16(RegBMSCellVMin, uint16(minV*1000))
+	bu.bms.WriteU16(RegBMSCellVMinIdx, minVIdx)
+	bu.bms.WriteU16(RegBMSCellVAvg, uint16(avgV*1000))
+	bu.bms.WriteU16(RegBMSCellTMax, int16ToUint16(int16(maxT*10)))
+	bu.bms.WriteU16(RegBMSCellTMaxIdx, maxTIdx)
+	bu.bms.WriteU16(RegBMSCellTMin, int16ToUint16(int16(minT*10)))
+	bu.bms.WriteU16(RegBMSCellTMinIdx, minTIdx)
+	bu.bms.WriteU16(RegBMSCellTAvg, int16ToUint16(int16(avgT*10)))
+	bu.bms.WriteU16(RegBMSCellVSpread, uint16(spreadV*1000))
+	bu.bms.WriteU16(RegBMSCellTSpread, uint16(spreadT*10))
 }
 
 func (bu *BatteryUnit) syncSystemStatus(powerKW float64) {
@@ -104,8 +146,8 @@ func (bu *BatteryUnit) syncPCSGrid(powerKW float64) {
 
 	phaseRegs := []uint16{RegPCSVoltageA, RegPCSVoltageB, RegPCSVoltageC}
 	for _, reg := range phaseRegs {
-		jitter := 1.0 + (rand.Float64()*0.1 - 0.05)
-		bu.pcs.WriteU16(reg, uint16(bu.gridVoltage*jitter*10))
+		jitter := 1.0 + (rand.Float64()*0.01 - 0.005)
+		bu.pcs.WriteU16(reg, uint16(bu.pcsACVoltage*jitter*10))
 	}
 
 	currentRegs := []uint16{RegPCSCurrentA, RegPCSCurrentB, RegPCSCurrentC}

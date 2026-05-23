@@ -40,7 +40,7 @@ func newTestPV(t *testing.T) *PVUnit {
 func newTestMeter(t *testing.T) *Meter {
 	t.Helper()
 	sim := newTestSimulator(t)
-	return sim.meter
+	return sim.meters[0].meter
 }
 
 func localTime(year int, month time.Month, day, hour, minute, second int) time.Time {

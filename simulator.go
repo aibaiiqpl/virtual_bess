@@ -8,6 +8,16 @@ import (
 	"aiwatt.net/ems/go-common/zaplog"
 )
 
+// meterAgg 描述一个电表的聚合源（按 slave_id / load name 预解析为索引）。
+type meterAgg struct {
+	meter   *Meter
+	isMain  bool
+	outflow bool // true = forward 方向为从设备回流到电网（PV 发电为正）
+	pcsIdx  []int
+	pvIdx   []int
+	loadIdx []int
+}
+
 // Simulator 顶层调度器，持有所有 unit 和 slave 寄存器。
 type Simulator struct {
 	mu     sync.Mutex
@@ -18,8 +28,8 @@ type Simulator struct {
 
 	batteries []*BatteryUnit
 	pvs       []*PVUnit
-	meter     *Meter
-	load      *Load
+	meters    []*meterAgg
+	loads     []*Load
 	weather   *Weather
 
 	gridVoltage float64
@@ -49,7 +59,9 @@ func NewSimulator(cfg *Config, server *mbserver.Server) *Simulator {
 
 	// 创建共享子系统。
 	sim.weather = NewWeather()
-	sim.load = NewLoad(cfg.Load.RatedPowerKW)
+	for _, ldCfg := range cfg.Loads {
+		sim.loads = append(sim.loads, NewLoad(ldCfg.Name, ldCfg.RatedPowerKW))
+	}
 
 	// 创建 N 套电池单元。
 	for _, buCfg := range cfg.BatteryUnits {
@@ -58,7 +70,7 @@ func NewSimulator(cfg *Config, server *mbserver.Server) *Simulator {
 		sim.banks[buCfg.PCSSlaveID] = pcsBank
 		sim.banks[buCfg.BMSSlaveID] = bmsBank
 
-		bu := NewBatteryUnit(buCfg, sim.gridVoltage, pcsBank, bmsBank)
+		bu := NewBatteryUnit(buCfg, cfg.PCS.ACVoltage, pcsBank, bmsBank)
 		sim.batteries = append(sim.batteries, bu)
 
 		sim.writeHandlers[buCfg.PCSSlaveID] = bu.OnPCSWrite
@@ -69,23 +81,67 @@ func NewSimulator(cfg *Config, server *mbserver.Server) *Simulator {
 	for _, pvCfg := range cfg.PVUnits {
 		bank := NewSlaveBank(pvCfg.SlaveID, false)
 		sim.banks[pvCfg.SlaveID] = bank
-		pv := NewPVUnit(pvCfg, sim.gridVoltage, bank)
+		pv := NewPVUnit(pvCfg, cfg.PCS.ACVoltage, bank)
 		sim.pvs = append(sim.pvs, pv)
 		sim.writeHandlers[pvCfg.SlaveID] = pv.OnPVWrite
 	}
 
-	// 创建唯一电表。
-	meterBank := NewSlaveBank(cfg.Meter.SlaveID, false)
-	sim.banks[cfg.Meter.SlaveID] = meterBank
-	sim.meter = NewMeter(cfg.Meter, sim.gridVoltage, meterBank)
+	// 创建 N 块电表（主关口 + 子电表）。
+	pcsIdxByID := map[uint8]int{}
+	for i, bu := range sim.batteries {
+		pcsIdxByID[cfg.BatteryUnits[i].PCSSlaveID] = i
+		_ = bu
+	}
+	pvIdxByID := map[uint8]int{}
+	for i := range sim.pvs {
+		pvIdxByID[cfg.PVUnits[i].SlaveID] = i
+	}
+	loadIdxByName := map[string]int{}
+	for i, ld := range sim.loads {
+		loadIdxByName[ld.Name()] = i
+	}
+
+	for _, mCfg := range cfg.Meters {
+		bank := NewSlaveBank(mCfg.SlaveID, false)
+		sim.banks[mCfg.SlaveID] = bank
+		agg := &meterAgg{
+			meter:   NewMeter(mCfg, sim.gridVoltage, bank),
+			isMain:  mCfg.IsMain,
+			outflow: mCfg.FlowDirection == "outflow",
+		}
+		if mCfg.IsMain {
+			for i := range sim.batteries {
+				agg.pcsIdx = append(agg.pcsIdx, i)
+			}
+			for i := range sim.pvs {
+				agg.pvIdx = append(agg.pvIdx, i)
+			}
+			for i := range sim.loads {
+				agg.loadIdx = append(agg.loadIdx, i)
+			}
+		} else {
+			for _, id := range mCfg.PCSSlaveIDs {
+				agg.pcsIdx = append(agg.pcsIdx, pcsIdxByID[id])
+			}
+			for _, id := range mCfg.PVSlaveIDs {
+				agg.pvIdx = append(agg.pvIdx, pvIdxByID[id])
+			}
+			for _, n := range mCfg.LoadNames {
+				agg.loadIdx = append(agg.loadIdx, loadIdxByName[n])
+			}
+		}
+		sim.meters = append(sim.meters, agg)
+	}
 
 	// 初始化：跑一次 weather/load/PV/meter 同步，让寄存器有初值。
 	sim.weather.Update(0)
-	sim.load.Update(now)
+	for _, ld := range sim.loads {
+		ld.Update(now)
+	}
 	for _, pv := range sim.pvs {
 		pv.UpdateSimulation(now, 0, sim.weather.Coeff())
 	}
-	sim.updateMeter(0)
+	sim.updateMeters(0)
 	sim.syncAll()
 	return sim
 }
@@ -100,7 +156,9 @@ func (sim *Simulator) Tick() {
 	sim.lastTick = now
 
 	sim.weather.Update(dt)
-	sim.load.Update(now)
+	for _, ld := range sim.loads {
+		ld.Update(now)
+	}
 
 	for _, bu := range sim.batteries {
 		bu.ProcessBMSControls()
@@ -115,20 +173,29 @@ func (sim *Simulator) Tick() {
 		pv.UpdateSimulation(now, dt, weatherCoeff)
 	}
 
-	sim.updateMeter(dt)
+	sim.updateMeters(dt)
 	sim.syncAll()
 }
 
-func (sim *Simulator) updateMeter(dt float64) {
-	totalPCS := 0.0
-	for _, bu := range sim.batteries {
-		totalPCS += bu.ActualPowerKW()
+func (sim *Simulator) updateMeters(dt float64) {
+	for _, agg := range sim.meters {
+		var pcs, pv, load float64
+		for _, i := range agg.pcsIdx {
+			pcs += sim.batteries[i].ActualPowerKW()
+		}
+		for _, i := range agg.pvIdx {
+			pv += sim.pvs[i].ActualPowerKW()
+		}
+		for _, i := range agg.loadIdx {
+			load += sim.loads[i].ActualPowerKW()
+		}
+		if agg.outflow {
+			// 翻转方向：发电/放电变为 forward
+			agg.meter.Update(dt, -load, -pcs, -pv)
+		} else {
+			agg.meter.Update(dt, load, pcs, pv)
+		}
 	}
-	totalPV := 0.0
-	for _, pv := range sim.pvs {
-		totalPV += pv.ActualPowerKW()
-	}
-	sim.meter.Update(dt, sim.load.ActualPowerKW(), totalPCS, totalPV)
 }
 
 func (sim *Simulator) syncAll() {
@@ -138,7 +205,9 @@ func (sim *Simulator) syncAll() {
 	for _, pv := range sim.pvs {
 		pv.Sync()
 	}
-	sim.meter.Sync()
+	for _, agg := range sim.meters {
+		agg.meter.Sync()
+	}
 }
 
 // ---- Modbus 函数处理器 ----

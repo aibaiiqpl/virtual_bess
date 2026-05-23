@@ -147,15 +147,15 @@ func TestSimulatorAggregatesMultiplePCSAndPV(t *testing.T) {
 		Modbus: ModbusConfig{Address: ""},
 		Grid:   GridConfig{Voltage: 220},
 		BatteryUnits: []BatteryUnitConfig{
-			{PCSSlaveID: 1, BMSSlaveID: 11, RatedCapacityKWh: 100, RatedPowerKW: 50, InitialSOC: 50, SOH: 100, BatteryVoltage: 800, ClusterCount: 1},
-			{PCSSlaveID: 2, BMSSlaveID: 12, RatedCapacityKWh: 100, RatedPowerKW: 50, InitialSOC: 50, SOH: 100, BatteryVoltage: 800, ClusterCount: 1},
+			{PCSSlaveID: 1, BMSSlaveID: 11, RatedCapacityKWh: 100, RatedPowerKW: 50, InitialSOC: 50, SOH: 100, BatteryVoltageFull: 1400, ClusterCount: 1},
+			{PCSSlaveID: 2, BMSSlaveID: 12, RatedCapacityKWh: 100, RatedPowerKW: 50, InitialSOC: 50, SOH: 100, BatteryVoltageFull: 1400, ClusterCount: 1},
 		},
 		PVUnits: []PVUnitConfig{
 			{SlaveID: 21, RatedPowerKW: 30},
 			{SlaveID: 22, RatedPowerKW: 30},
 		},
-		Meter: MeterConfig{SlaveID: 31},
-		Load:  LoadCfg{RatedPowerKW: 80},
+		Meters: []MeterConfig{{SlaveID: 31, Name: "main", IsMain: true}},
+		Loads:  []LoadCfg{{Name: "load", RatedPowerKW: 80}},
 	}
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
@@ -169,11 +169,11 @@ func TestSimulatorAggregatesMultiplePCSAndPV(t *testing.T) {
 	sim.batteries[1].actualPowerKW = -5
 	sim.pvs[0].actualPowerKW = 12
 	sim.pvs[1].actualPowerKW = 8
-	sim.load.actualPowerKW = 30
+	sim.loads[0].actualPowerKW = 30
 
-	sim.updateMeter(0)
+	sim.updateMeters(0)
 	want := 30.0 + (10.0 + -5.0) - (12.0 + 8.0) // = 15
-	if math.Abs(sim.meter.gridPowerKW-want) > 0.001 {
-		t.Fatalf("meter gridPower = %v, want %v", sim.meter.gridPowerKW, want)
+	if math.Abs(sim.meters[0].meter.gridPowerKW-want) > 0.001 {
+		t.Fatalf("meter gridPower = %v, want %v", sim.meters[0].meter.gridPowerKW, want)
 	}
 }

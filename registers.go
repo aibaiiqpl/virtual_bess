@@ -138,6 +138,19 @@ const (
 	RegBMSMaxDischargePW  = 40121 // U16, 0.1 kW
 	RegBMSMaxChargeI      = 40122 // U16, 0.1 A
 	RegBMSMaxDischargeI   = 40123 // U16, 0.1 A
+
+	RegBMSCellVMax     = 40124 // U16, 0.001 V, max single-cell voltage
+	RegBMSCellVMaxIdx  = 40125 // U16, max-voltage cell index
+	RegBMSCellVMin     = 40126 // U16, 0.001 V, min single-cell voltage
+	RegBMSCellVMinIdx  = 40127 // U16, min-voltage cell index
+	RegBMSCellVAvg     = 40128 // U16, 0.001 V, average single-cell voltage
+	RegBMSCellTMax     = 40129 // S16, 0.1 °C, max single-cell temperature
+	RegBMSCellTMaxIdx  = 40130 // U16, max-temperature cell index
+	RegBMSCellTMin     = 40131 // S16, 0.1 °C, min single-cell temperature
+	RegBMSCellTMinIdx  = 40132 // U16, min-temperature cell index
+	RegBMSCellTAvg     = 40133 // S16, 0.1 °C, average single-cell temperature
+	RegBMSCellVSpread  = 40134 // U16, 0.001 V, cell voltage spread (max - min)
+	RegBMSCellTSpread  = 40135 // U16, 0.1 °C, cell temperature spread (max - min)
 )
 
 // Cluster Input Register layout: each cluster occupies a block with stride 1600.

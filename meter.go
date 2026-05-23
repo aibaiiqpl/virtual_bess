@@ -10,27 +10,49 @@ import (
 // of reactive power at the PCC is the load itself.
 const loadPowerFactor = 0.95
 
-// Meter 是 PCC（公共连接点）的电表，唯一一台。
-// 它聚合所有 PCS / PV 的功率与单台负载，得到入网功率和能量。
+// Meter 表示一台电表。可以是主关口（PCC，聚合全部源）或子电表
+// （只聚合配置中指定的 PCS / PV / 负载子集）。
 type Meter struct {
 	bank *SlaveBank
+	name string
 
-	gridVoltage float64
+	gridVoltage float64 // 一次侧电压 V
+	ptRatio     float64 // 电压互感器变比（一次/二次）
+	ctRatio     float64 // 电流互感器变比（一次/二次）
 
 	// 当前 tick 输入
-	gridPowerKW   float64
-	loadPowerKW   float64
+	gridPowerKW float64
+	loadPowerKW float64
 
 	// 累计能量
 	forwardKWh float64
 	reverseKWh float64
 }
 
-func NewMeter(cfg MeterConfig, gridVoltage float64, bank *SlaveBank) *Meter {
-	_ = cfg
+func NewMeter(cfg MeterConfig, defaultVoltage float64, bank *SlaveBank) *Meter {
+	v := cfg.Voltage
+	if v == 0 {
+		v = defaultVoltage
+	}
+	pt := cfg.PTRatio
+	if pt <= 0 {
+		// 自动选择能让二次值落入 U16(0.1V) 范围的最小整数变比。
+		// U16 上限对应 6553.5 V，留 5% 余量。
+		pt = math.Ceil(v / 6200.0)
+		if pt < 1 {
+			pt = 1
+		}
+	}
+	ct := cfg.CTRatio
+	if ct <= 0 {
+		ct = 1
+	}
 	return &Meter{
 		bank:        bank,
-		gridVoltage: gridVoltage,
+		name:        cfg.Name,
+		gridVoltage: v,
+		ptRatio:     pt,
+		ctRatio:     ct,
 	}
 }
 
@@ -69,20 +91,24 @@ func (m *Meter) Sync() {
 		pfMag = math.Abs(gridPowerKW) / apparentKVA
 	}
 
+	// 二次侧 = 一次侧 / (PT × CT)，与电压/电流约定一致，EMS 端统一 × PT × CT 还原。
+	ptct := m.ptRatio * m.ctRatio
+
 	// 能量寄存器（S32, 0.01 kWh → ×100）
 	combinedKWh := m.forwardKWh + m.reverseKWh
-	m.bank.WriteS32(RegMeterCombinedEnergyHi, int32(combinedKWh*100))
-	m.bank.WriteS32(RegMeterForwardEnergyHi, int32(m.forwardKWh*100))
-	m.bank.WriteS32(RegMeterReverseEnergyHi, int32(m.reverseKWh*100))
+	m.bank.WriteS32(RegMeterCombinedEnergyHi, int32(combinedKWh*100/ptct))
+	m.bank.WriteS32(RegMeterForwardEnergyHi, int32(m.forwardKWh*100/ptct))
+	m.bank.WriteS32(RegMeterReverseEnergyHi, int32(m.reverseKWh*100/ptct))
 
-	// 三相电压 (U16, 0.1 V) ±0.5% jitter
+	// 三相电压 ±0.5% jitter；phaseVoltages 保留一次侧，寄存器存二次侧 (U16, 0.1 V)
 	phaseVoltages := [3]float64{}
 	phaseVoltRegs := [3]uint16{RegMeterVoltageA, RegMeterVoltageB, RegMeterVoltageC}
 	for i, reg := range phaseVoltRegs {
 		jitter := 1.0 + (rand.Float64()*0.01 - 0.005)
 		v := m.gridVoltage * jitter
 		phaseVoltages[i] = v
-		m.bank.WriteU16(reg, uint16(v*10))
+		secondary := v / m.ptRatio
+		m.bank.WriteU16(reg, uint16(secondary*10))
 	}
 
 	// 三相电流 (S32, 0.1 A)：幅值跟视在功率，符号跟有功方向
@@ -99,26 +125,26 @@ func (m *Meter) Sync() {
 				currentA = mag
 			}
 		}
-		m.bank.WriteS32(hiReg, int32(currentA*10))
+		m.bank.WriteS32(hiReg, int32(currentA/m.ctRatio*10))
 	}
 
-	// 有功 (S32, 0.001 kW)
-	m.bank.WriteS32(RegMeterActivePWTotalHi, int32(gridPowerKW*1000))
-	phasePW1000 := int32(phasePowerKW * 1000)
+	// 有功 (S32, 0.001 kW)，写二次侧
+	m.bank.WriteS32(RegMeterActivePWTotalHi, int32(gridPowerKW*1000/ptct))
+	phasePW1000 := int32(phasePowerKW * 1000 / ptct)
 	m.bank.WriteS32(RegMeterActivePWAHi, phasePW1000)
 	m.bank.WriteS32(RegMeterActivePWBHi, phasePW1000)
 	m.bank.WriteS32(RegMeterActivePWCHi, phasePW1000)
 
-	// 无功 (S32, 0.001 kVar)
-	m.bank.WriteS32(RegMeterReactivePWTotalHi, int32(reactiveKVar*1000))
-	phaseReact1000 := int32(reactiveKVar / 3.0 * 1000)
+	// 无功 (S32, 0.001 kVar)，写二次侧
+	m.bank.WriteS32(RegMeterReactivePWTotalHi, int32(reactiveKVar*1000/ptct))
+	phaseReact1000 := int32(reactiveKVar / 3.0 * 1000 / ptct)
 	m.bank.WriteS32(RegMeterReactivePWAHi, phaseReact1000)
 	m.bank.WriteS32(RegMeterReactivePWBHi, phaseReact1000)
 	m.bank.WriteS32(RegMeterReactivePWCHi, phaseReact1000)
 
-	// 视在 (S32, 0.001 kVA)
-	m.bank.WriteS32(RegMeterApparentPWTotalHi, int32(apparentKVA*1000))
-	phaseAppar1000 := int32(phaseApparentKVA * 1000)
+	// 视在 (S32, 0.001 kVA)，写二次侧
+	m.bank.WriteS32(RegMeterApparentPWTotalHi, int32(apparentKVA*1000/ptct))
+	phaseAppar1000 := int32(phaseApparentKVA * 1000 / ptct)
 	m.bank.WriteS32(RegMeterApparentPWAHi, phaseAppar1000)
 	m.bank.WriteS32(RegMeterApparentPWBHi, phaseAppar1000)
 	m.bank.WriteS32(RegMeterApparentPWCHi, phaseAppar1000)

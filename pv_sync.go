@@ -27,8 +27,8 @@ func (pv *PVUnit) Sync() {
 
 	phaseRegs := []uint16{RegPVACVoltageA, RegPVACVoltageB, RegPVACVoltageC}
 	for _, reg := range phaseRegs {
-		jitter := 1.0 + (rand.Float64()*0.1 - 0.05)
-		pv.bank.WriteU16(reg, uint16(pv.gridVoltage*jitter*10))
+		jitter := 1.0 + (rand.Float64()*0.01 - 0.005)
+		pv.bank.WriteU16(reg, uint16(pv.pcsACVoltage*jitter*10))
 	}
 
 	phasePowerKW := powerKW / 3.0

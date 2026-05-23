@@ -2,60 +2,137 @@ modbus:
   address: ":502"
 
 grid:
-  voltage: 220                 # 共享电网相电压 V，电表/PCS/PV 都用它
+  voltage: 10000               # 电表所在侧的相电压 V（PCC 点）
 
-# 电池单元，每套 = 1 PCS slave + 1 BMS slave，紧密耦合。
-# 至少配置 1 套。每套可独立设置容量、功率、SOC 等。
+pcs:
+  ac_voltage: 720              # PCS / PV 逆变器 AC 出口相电压 V（升压变低压侧）
+
+# 电池单元：仅 1# 分区，一主一从，共 2 套。
 battery_units:
   - pcs_slave_id: 1
     bms_slave_id: 11
-    rated_capacity_kwh: 261
-    rated_power_kw: 120
+    rated_capacity_kwh: 5016
+    rated_power_kw: 2500
     initial_soc: 30.0
     soh: 100.0
-    battery_voltage: 800
-    cluster_count: 1
+    battery_voltage_full: 1400
+    cluster_count: 12
   - pcs_slave_id: 2
     bms_slave_id: 12
-    rated_capacity_kwh: 261
-    rated_power_kw: 120
-    initial_soc: 50.0
+    rated_capacity_kwh: 5016
+    rated_power_kw: 2500
+    initial_soc: 30.0
     soh: 100.0
-    battery_voltage: 800
-    cluster_count: 1
-  - pcs_slave_id: 3
-    bms_slave_id: 13
-    rated_capacity_kwh: 261
-    rated_power_kw: 120
-    initial_soc: 70.0
-    soh: 100.0
-    battery_voltage: 800
-    cluster_count: 1
+    battery_voltage_full: 1400
+    cluster_count: 12
 
-# 光伏逆变器，每台一个 slave。所有 PV 共用同一份天气模型，
-# 输出会一起注入到唯一的电表。
+# 光伏逆变器，10 台：21,22 挂 zone1 关口表下；23-26 挂 PV 表 1；27-30 挂 PV 表 2
 pv_units:
   - slave_id: 21
-    rated_power_kw: 120
+    rated_power_kw: 150
   - slave_id: 22
-    rated_power_kw: 120
+    rated_power_kw: 150
   - slave_id: 23
-    rated_power_kw: 120
+    rated_power_kw: 150
   - slave_id: 24
-    rated_power_kw: 120
+    rated_power_kw: 150
   - slave_id: 25
-    rated_power_kw: 120
+    rated_power_kw: 150
+  - slave_id: 26
+    rated_power_kw: 150
+  - slave_id: 27
+    rated_power_kw: 150
+  - slave_id: 28
+    rated_power_kw: 150
+  - slave_id: 29
+    rated_power_kw: 150
+  - slave_id: 30
+    rated_power_kw: 150
 
-# 唯一的电表（PCC 点），汇总所有 PCS / PV / Load 的功率。
-meter:
-  slave_id: 31
+# 2 路负载，分别挂在两块 400V 负载表下，每路最大 2000kW
+loads:
+  - name: load_a
+    rated_power_kw: 2000
+  - name: load_b
+    rated_power_kw: 2000
 
-# 唯一的商业/工业负载，纯内部模拟，不暴露 modbus。
-# 曲线含早晚高峰、午间凹陷与夜间低基线。
-load:
-  rated_power_kw: 80
+# 电表：1 主关口 (15kV) + 1 zone1 关口 (800V) + 2 PV 计量 (800V) + 2 负载 (400V) + 1 储能计量 (800V)
+#
+# 仿真输出约定（全部统一写二次侧，EMS 端 × PT × CT 还原）：
+#   - 电压：写 V_一次 / PT （U16, 0.1V）
+#   - 电流：写 I_一次 / CT （S32, 0.1A；CT=1 时即一次值）
+#   - 功率/电度：写 P_一次 / (PT × CT) （S32）
+#
+# EMS 侧还原：
+#   实际电压 = 寄存器值 × 0.1V × PT
+#   实际电流 = 寄存器值 × 0.1A × CT
+#   实际有功 = 寄存器值 × 0.001kW × PT × CT
+#   实际电度 = 寄存器值 × 0.01kWh × PT × CT
+#
+# | Slave | 表             | 聚合                              | 一次电压 | EMS PT | EMS CT |
+# |-------|----------------|-----------------------------------|----------|--------|--------|
+# | 31    | main (15kV)    | 全部 PCS / PV / 负载              | 15000V   | 150    | 1      |
+# | 32    | zone1 (800V)   | PCS1,2 + PV21,22 （无负载）       | 800V     | 1      | 1      |
+# | 34    | pv1 (800V)     | PV23,24,25,26 （发电=forward）    | 800V     | 1      | 1      |
+# | 38    | pv2 (800V)     | PV27,28,29,30 （发电=forward）    | 800V     | 1      | 1      |
+# | 35    | load1 (400V)   | load_a （≤ 2000kW）               | 400V     | 1      | 1      |
+# | 39    | load2 (400V)   | load_b （≤ 2000kW）               | 400V     | 1      | 1      |
+# | 36    | pcs1_2 (800V)  | PCS1+PCS2 充放电                  | 800V     | 1      | 1      |
+meters:
+  - slave_id: 31
+    name: main
+    is_main: true             # 主关口表，自动聚合全部 PCS / PV / 负载
+    voltage: 15000            # 15kV 系统线电压
+    pt_ratio: 150             # EMS 端配 PT=150, CT=1
+  - slave_id: 32
+    name: zone1               # zone1 关口表（储能 + 屋顶 PV，无负载）
+    pcs_slave_ids: [1, 2]
+    pv_slave_ids: [21, 22]
+    voltage: 800              # 800V 低压侧
+    pt_ratio: 1               # EMS 端配 PT=1, CT=1
+  - slave_id: 33
+    name: pv_zone1            # zone1 屋顶 PV 计量表（PV21,22；发电 = forward）
+    pv_slave_ids: [21, 22]
+    flow_direction: outflow
+    voltage: 800
+    pt_ratio: 1               # EMS 端配 PT=1, CT=1
+  - slave_id: 34
+    name: pv1                 # PV 计量表 1（发电 = forward）
+    pv_slave_ids: [23, 24, 25, 26]
+    flow_direction: outflow
+    voltage: 800
+    pt_ratio: 1               # EMS 端配 PT=1, CT=1
+  - slave_id: 38
+    name: pv2                 # PV 计量表 2（发电 = forward）
+    pv_slave_ids: [27, 28, 29, 30]
+    flow_direction: outflow
+    voltage: 800
+    pt_ratio: 1               # EMS 端配 PT=1, CT=1
+  - slave_id: 35
+    name: load1               # 负载电表 1（400V，≤ 2000kW）
+    load_names: [load_a]
+    voltage: 400
+    pt_ratio: 1               # EMS 端配 PT=1, CT=1
+  - slave_id: 39
+    name: load2               # 负载电表 2（400V，≤ 2000kW）
+    load_names: [load_b]
+    voltage: 400
+    pt_ratio: 1               # EMS 端配 PT=1, CT=1
+  - slave_id: 36
+    name: pcs1_2              # 储能计量表（PCS1+PCS2 充放电）
+    pcs_slave_ids: [1, 2]
+    voltage: 800
+    pt_ratio: 1               # EMS 端配 PT=1, CT=1
 
 log:
   file: "logs/virtual_bess.log"
   level: "info"
   console: true
+
+# 持久化：电表 forward/reverse 电度、电池 SOC/总充总放、PV 总/日/月/年发电量。
+# 进程退出（SIGTERM/SIGINT）和每 interval 秒各刷一次。
+state:
+  file: "state.json"
+  interval: 15
+
+timezone: "Europe/Lisbon"

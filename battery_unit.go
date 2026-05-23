@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math"
 	"math/rand"
 
 	"aiwatt.net/ems/go-common/zaplog"
@@ -14,12 +15,12 @@ type BatteryUnit struct {
 	bms *SlaveBank
 
 	// 配置（不可变）
-	ratedCapacityKWh  float64
-	ratedPowerKW      float64
-	soh               float64
-	batteryVoltageNom float64
-	gridVoltage       float64
-	clusterCount      int
+	ratedCapacityKWh   float64
+	ratedPowerKW       float64
+	soh                float64
+	batteryVoltageFull float64
+	pcsACVoltage       float64
+	clusterCount       int
 
 	// 动态状态
 	currentEnergyKWh     float64
@@ -39,17 +40,17 @@ type BatteryUnit struct {
 }
 
 // NewBatteryUnit 构造一套电池单元，并初始化两个 slave bank 的默认寄存器值。
-func NewBatteryUnit(cfg BatteryUnitConfig, gridVoltage float64, pcs, bms *SlaveBank) *BatteryUnit {
+func NewBatteryUnit(cfg BatteryUnitConfig, pcsACVoltage float64, pcs, bms *SlaveBank) *BatteryUnit {
 	bu := &BatteryUnit{
-		pcs:               pcs,
-		bms:               bms,
-		ratedCapacityKWh:  cfg.RatedCapacityKWh,
-		ratedPowerKW:      cfg.RatedPowerKW,
-		soh:               cfg.SOH,
-		batteryVoltageNom: cfg.BatteryVoltage,
-		gridVoltage:       gridVoltage,
-		clusterCount:      cfg.ClusterCount,
-		currentEnergyKWh:  cfg.RatedCapacityKWh * cfg.InitialSOC / 100.0,
+		pcs:                pcs,
+		bms:                bms,
+		ratedCapacityKWh:   cfg.RatedCapacityKWh,
+		ratedPowerKW:       cfg.RatedPowerKW,
+		soh:                cfg.SOH,
+		batteryVoltageFull: cfg.BatteryVoltageFull,
+		pcsACVoltage:       pcsACVoltage,
+		clusterCount:       cfg.ClusterCount,
+		currentEnergyKWh:   cfg.RatedCapacityKWh * cfg.InitialSOC / 100.0,
 		remoteMode:        true,
 		gridTied:          true,
 		bmsHVClosed:       true,
@@ -77,10 +78,30 @@ func (bu *BatteryUnit) SOC() float64 {
 	return bu.currentEnergyKWh / bu.ratedCapacityKWh * 100.0
 }
 
-// BatteryVoltage 按 SOC 在 90%~110% 标称电压之间插值。
+// BatteryVoltage 按单体电压曲线（SOC=0% → 2.8V，SOC=100% → 3.6V）线性插值，
+// 再乘以串数得到 pack 电压。满电时近似等于 batteryVoltageFull。
 func (bu *BatteryUnit) BatteryVoltage() float64 {
-	return bu.batteryVoltageNom * (0.9 + 0.2*bu.SOC()/100.0)
+	return float64(bu.cellCount()) * bu.cellAvgVoltage()
 }
+
+// cellCount 由满电电压 / 满电单体电压估算串数。
+func (bu *BatteryUnit) cellCount() int {
+	n := int(math.Round(bu.batteryVoltageFull / cellVoltageFull))
+	if n < 2 {
+		n = 2
+	}
+	return n
+}
+
+// cellAvgVoltage 按 SOC 在 cellVoltageEmpty ~ cellVoltageFull 之间线性插值。
+func (bu *BatteryUnit) cellAvgVoltage() float64 {
+	return cellVoltageEmpty + (cellVoltageFull-cellVoltageEmpty)*bu.SOC()/100.0
+}
+
+const (
+	cellVoltageEmpty = 2.8 // V, SOC=0
+	cellVoltageFull  = 3.6 // V, SOC=100
+)
 
 // ---- 写回调：写入瞬间触发的副作用 ----
 

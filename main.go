@@ -26,6 +26,8 @@ func main() {
 		cfg.Modbus.Address = fmt.Sprintf(":%d", *port)
 	}
 
+	SetPVTimezone(cfg.Timezone)
+
 	if cfg.Log.File != "" {
 		zaplog.InitZapLogger(cfg.Log.Console, cfg.Log.File, cfg.Log.Level)
 	} else {
@@ -33,8 +35,8 @@ func main() {
 	}
 	defer zaplog.Defer()
 
-	zaplog.Infof("starting virtual BESS: %d battery_unit(s), %d pv_unit(s), meter slave %d",
-		len(cfg.BatteryUnits), len(cfg.PVUnits), cfg.Meter.SlaveID)
+	zaplog.Infof("starting virtual BESS: %d battery_unit(s), %d pv_unit(s), %d meter(s), %d load(s)",
+		len(cfg.BatteryUnits), len(cfg.PVUnits), len(cfg.Meters), len(cfg.Loads))
 
 	server := mbserver.NewServer()
 	if err := server.ListenTCP(cfg.Modbus.Address); err != nil {
@@ -45,8 +47,35 @@ func main() {
 
 	sim := NewSimulator(cfg, server)
 
+	// 启动时加载持久化状态
+	if cfg.State.File != "" {
+		st, err := LoadState(cfg.State.File)
+		if err != nil {
+			zaplog.Errorf("load state %s: %v", cfg.State.File, err)
+		} else if st != nil {
+			sim.RestoreLocked(st)
+			zaplog.Infof("restored state from %s: %d meter(s), %d battery(s), %d pv(s)",
+				cfg.State.File, len(st.Meters), len(st.Batteries), len(st.PVs))
+		}
+	}
+
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
+
+	var saveTicker *time.Ticker
+	var saveC <-chan time.Time
+	if cfg.State.File != "" {
+		saveTicker = time.NewTicker(time.Duration(cfg.State.Interval) * time.Second)
+		defer saveTicker.Stop()
+		saveC = saveTicker.C
+	}
+
+	saveNow := func() {
+		st := sim.SnapshotLocked()
+		if err := SaveState(cfg.State.File, st); err != nil {
+			zaplog.Errorf("save state %s: %v", cfg.State.File, err)
+		}
+	}
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
@@ -55,8 +84,13 @@ func main() {
 		select {
 		case <-ticker.C:
 			sim.Tick()
+		case <-saveC:
+			saveNow()
 		case sig := <-sigCh:
 			zaplog.Infof("received signal %v, shutting down", sig)
+			if cfg.State.File != "" {
+				saveNow()
+			}
 			server.Close()
 			return
 		}

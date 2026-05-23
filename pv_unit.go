@@ -7,6 +7,23 @@ import (
 
 const pvInverterEfficiency = 0.98
 
+// pvLocation 持有站点时区，用于把 UTC 时间转换为本地太阳时。
+var pvLocation *time.Location = time.Local
+
+// SetPVTimezone 在程序启动时由 config 调用一次，设置 PV 计算时区。
+func SetPVTimezone(tz string) {
+	if tz == "" {
+		pvLocation = time.Local
+		return
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		pvLocation = time.Local
+		return
+	}
+	pvLocation = loc
+}
+
 type pvLimitMode int
 
 const (
@@ -19,7 +36,7 @@ type PVUnit struct {
 	bank *SlaveBank
 
 	ratedPowerKW      float64
-	gridVoltage       float64
+	pcsACVoltage      float64
 	batteryVoltageNom float64
 
 	running          bool
@@ -37,11 +54,11 @@ type PVUnit struct {
 	dayKey, monthKey, yearKey int
 }
 
-func NewPVUnit(cfg PVUnitConfig, gridVoltage float64, bank *SlaveBank) *PVUnit {
+func NewPVUnit(cfg PVUnitConfig, pcsACVoltage float64, bank *SlaveBank) *PVUnit {
 	pv := &PVUnit{
 		bank:              bank,
 		ratedPowerKW:      cfg.RatedPowerKW,
-		gridVoltage:       gridVoltage,
+		pcsACVoltage:      pcsACVoltage,
 		batteryVoltageNom: 800, // DC bus 显示用，固定值；不与 BMS 关联
 		running:           true,
 		limitMode:         pvLimitPercent,
@@ -130,25 +147,20 @@ func (pv *PVUnit) UpdateSimulation(now time.Time, dtSeconds, weatherCoeff float6
 }
 
 func (pv *PVUnit) naturalPowerKW(now time.Time, weatherCoeff float64) float64 {
-	hour := float64(now.Hour()) +
-		float64(now.Minute())/60.0 +
-		float64(now.Second())/3600.0 +
-		float64(now.Nanosecond())/float64(time.Hour)
+	local := now.In(pvLocation)
+	hour := float64(local.Hour()) +
+		float64(local.Minute())/60.0 +
+		float64(local.Second())/3600.0 +
+		float64(local.Nanosecond())/float64(time.Hour)
 
-	if hour < 6 || hour >= 18 {
+	// 日出 6:00，日落 20:00，正午 13:00（适合葡萄牙夏令时）
+	const sunrise, sunset, solar_noon = 6.0, 20.0, 13.0
+	if hour <= sunrise || hour >= sunset {
 		return 0
 	}
-
-	peak := pv.ratedPowerKW * 0.9
-	var natural float64
-	switch {
-	case hour < 13:
-		natural = peak * (hour - 6) / 7
-	case hour <= 15:
-		natural = peak
-	default:
-		natural = peak * (18 - hour) / 3
-	}
+	// 以正午为中心的 sin 曲线：f(t) = sin(π * (t-sunrise)/(sunset-sunrise))
+	angle := math.Pi * (hour - sunrise) / (sunset - sunrise)
+	natural := pv.ratedPowerKW * 0.95 * math.Sin(angle)
 	return natural * weatherCoeff
 }
 

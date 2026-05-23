@@ -71,12 +71,12 @@ func TestMultipleBatteryUnitsRoutedBySlaveID(t *testing.T) {
 		Modbus: ModbusConfig{Address: ""},
 		Grid:   GridConfig{Voltage: 220},
 		BatteryUnits: []BatteryUnitConfig{
-			{PCSSlaveID: 1, BMSSlaveID: 11, RatedCapacityKWh: 100, RatedPowerKW: 50, InitialSOC: 50, SOH: 100, BatteryVoltage: 800, ClusterCount: 1},
-			{PCSSlaveID: 2, BMSSlaveID: 12, RatedCapacityKWh: 100, RatedPowerKW: 50, InitialSOC: 50, SOH: 100, BatteryVoltage: 800, ClusterCount: 1},
+			{PCSSlaveID: 1, BMSSlaveID: 11, RatedCapacityKWh: 100, RatedPowerKW: 50, InitialSOC: 50, SOH: 100, BatteryVoltageFull: 1400, ClusterCount: 1},
+			{PCSSlaveID: 2, BMSSlaveID: 12, RatedCapacityKWh: 100, RatedPowerKW: 50, InitialSOC: 50, SOH: 100, BatteryVoltageFull: 1400, ClusterCount: 1},
 		},
 		PVUnits: []PVUnitConfig{{SlaveID: 21, RatedPowerKW: 30}},
-		Meter:   MeterConfig{SlaveID: 31},
-		Load:    LoadCfg{RatedPowerKW: 80},
+		Meters:  []MeterConfig{{SlaveID: 31, Name: "main", IsMain: true}},
+		Loads:   []LoadCfg{{Name: "load", RatedPowerKW: 80}},
 	}
 	cfg.applyDefaults()
 	if err := cfg.validate(); err != nil {
