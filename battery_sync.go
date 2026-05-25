@@ -108,7 +108,6 @@ func (bu *BatteryUnit) syncPCSStatus(powerKW float64) {
 	bu.pcs.WriteU16(RegPCSRemoteStatus, boolToU16(bu.remoteMode))
 	bu.pcs.WriteU16(RegPCSGridStatus, boolToU16(!bu.gridTied))
 	bu.pcs.WriteU16(RegPCSAlarmStatus, 0)
-	bu.pcs.WriteU16(RegPCSFaultStatus, 0)
 
 	switch {
 	case !bu.pcsRunning:
@@ -121,11 +120,16 @@ func (bu *BatteryUnit) syncPCSStatus(powerKW float64) {
 		bu.pcs.WriteU16(RegPCSSysStatus, 2)
 	}
 
+	// 运行中 HV 被拉开，同样触发 DC 欠压故障并锁存
 	if bu.pcsRunning && !bu.bmsHVClosed {
+		bu.pcsDCUnderVoltFault = true
+	}
+	if bu.pcsDCUnderVoltFault {
 		bu.pcs.WriteU16(RegPCSDCUnderVolt, 1)
 		bu.pcs.WriteU16(RegPCSFaultStatus, 1)
 	} else {
 		bu.pcs.WriteU16(RegPCSDCUnderVolt, 0)
+		bu.pcs.WriteU16(RegPCSFaultStatus, 0)
 	}
 }
 

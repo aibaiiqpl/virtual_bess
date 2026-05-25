@@ -2,37 +2,37 @@
   "meters": [
     {
       "slave_id": 31,
-      "forward_kwh": 23081.61070191458,
+      "forward_kwh": 23565.476453998857,
       "reverse_kwh": 0
     },
     {
       "slave_id": 32,
       "forward_kwh": 0,
-      "reverse_kwh": 475.82557969746074
+      "reverse_kwh": 478.7817195991369
     },
     {
       "slave_id": 33,
-      "forward_kwh": 475.82557969746074,
+      "forward_kwh": 478.7817195991369,
       "reverse_kwh": 0
     },
     {
       "slave_id": 34,
-      "forward_kwh": 951.6511593949215,
+      "forward_kwh": 957.5634391982738,
       "reverse_kwh": 0
     },
     {
       "slave_id": 38,
-      "forward_kwh": 951.6511593949215,
+      "forward_kwh": 957.5634391982738,
       "reverse_kwh": 0
     },
     {
       "slave_id": 35,
-      "forward_kwh": 12726.911143513255,
+      "forward_kwh": 12976.312130667524,
       "reverse_kwh": 0
     },
     {
       "slave_id": 39,
-      "forward_kwh": 12733.827456888777,
+      "forward_kwh": 12983.072921327233,
       "reverse_kwh": 0
     },
     {
@@ -62,10 +62,10 @@
   "pvs": [
     {
       "slave_id": 21,
-      "total_energy_kwh": 237.91278984873037,
-      "daily_energy_kwh": 220.82738363626473,
-      "monthly_energy_kwh": 237.91278984873037,
-      "yearly_energy_kwh": 237.91278984873037,
+      "total_energy_kwh": 239.39085979956846,
+      "daily_energy_kwh": 222.30545358710282,
+      "monthly_energy_kwh": 239.39085979956846,
+      "yearly_energy_kwh": 239.39085979956846,
       "daily_peak_power_kw": 131.03999372999607,
       "day_key": 2026145,
       "month_key": 202605,
@@ -73,10 +73,10 @@
     },
     {
       "slave_id": 22,
-      "total_energy_kwh": 237.91278984873037,
-      "daily_energy_kwh": 220.82738363626473,
-      "monthly_energy_kwh": 237.91278984873037,
-      "yearly_energy_kwh": 237.91278984873037,
+      "total_energy_kwh": 239.39085979956846,
+      "daily_energy_kwh": 222.30545358710282,
+      "monthly_energy_kwh": 239.39085979956846,
+      "yearly_energy_kwh": 239.39085979956846,
       "daily_peak_power_kw": 131.03999372999607,
       "day_key": 2026145,
       "month_key": 202605,
@@ -84,10 +84,10 @@
     },
     {
       "slave_id": 23,
-      "total_energy_kwh": 237.91278984873037,
-      "daily_energy_kwh": 220.82738363626473,
-      "monthly_energy_kwh": 237.91278984873037,
-      "yearly_energy_kwh": 237.91278984873037,
+      "total_energy_kwh": 239.39085979956846,
+      "daily_energy_kwh": 222.30545358710282,
+      "monthly_energy_kwh": 239.39085979956846,
+      "yearly_energy_kwh": 239.39085979956846,
       "daily_peak_power_kw": 131.03999372999607,
       "day_key": 2026145,
       "month_key": 202605,
@@ -95,10 +95,10 @@
     },
     {
       "slave_id": 24,
-      "total_energy_kwh": 237.91278984873037,
-      "daily_energy_kwh": 220.82738363626473,
-      "monthly_energy_kwh": 237.91278984873037,
-      "yearly_energy_kwh": 237.91278984873037,
+      "total_energy_kwh": 239.39085979956846,
+      "daily_energy_kwh": 222.30545358710282,
+      "monthly_energy_kwh": 239.39085979956846,
+      "yearly_energy_kwh": 239.39085979956846,
       "daily_peak_power_kw": 131.03999372999607,
       "day_key": 2026145,
       "month_key": 202605,
@@ -106,10 +106,10 @@
     },
     {
       "slave_id": 25,
-      "total_energy_kwh": 237.91278984873037,
-      "daily_energy_kwh": 220.82738363626473,
-      "monthly_energy_kwh": 237.91278984873037,
-      "yearly_energy_kwh": 237.91278984873037,
+      "total_energy_kwh": 239.39085979956846,
+      "daily_energy_kwh": 222.30545358710282,
+      "monthly_energy_kwh": 239.39085979956846,
+      "yearly_energy_kwh": 239.39085979956846,
       "daily_peak_power_kw": 131.03999372999607,
       "day_key": 2026145,
       "month_key": 202605,
@@ -117,10 +117,10 @@
     },
     {
       "slave_id": 26,
-      "total_energy_kwh": 237.91278984873037,
-      "daily_energy_kwh": 220.82738363626473,
-      "monthly_energy_kwh": 237.91278984873037,
-      "yearly_energy_kwh": 237.91278984873037,
+      "total_energy_kwh": 239.39085979956846,
+      "daily_energy_kwh": 222.30545358710282,
+      "monthly_energy_kwh": 239.39085979956846,
+      "yearly_energy_kwh": 239.39085979956846,
       "daily_peak_power_kw": 131.03999372999607,
       "day_key": 2026145,
       "month_key": 202605,
@@ -128,10 +128,10 @@
     },
     {
       "slave_id": 27,
-      "total_energy_kwh": 237.91278984873037,
-      "daily_energy_kwh": 220.82738363626473,
-      "monthly_energy_kwh": 237.91278984873037,
-      "yearly_energy_kwh": 237.91278984873037,
+      "total_energy_kwh": 239.39085979956846,
+      "daily_energy_kwh": 222.30545358710282,
+      "monthly_energy_kwh": 239.39085979956846,
+      "yearly_energy_kwh": 239.39085979956846,
       "daily_peak_power_kw": 131.03999372999607,
       "day_key": 2026145,
       "month_key": 202605,
@@ -139,10 +139,10 @@
     },
     {
       "slave_id": 28,
-      "total_energy_kwh": 237.91278984873037,
-      "daily_energy_kwh": 220.82738363626473,
-      "monthly_energy_kwh": 237.91278984873037,
-      "yearly_energy_kwh": 237.91278984873037,
+      "total_energy_kwh": 239.39085979956846,
+      "daily_energy_kwh": 222.30545358710282,
+      "monthly_energy_kwh": 239.39085979956846,
+      "yearly_energy_kwh": 239.39085979956846,
       "daily_peak_power_kw": 131.03999372999607,
       "day_key": 2026145,
       "month_key": 202605,
@@ -150,10 +150,10 @@
     },
     {
       "slave_id": 29,
-      "total_energy_kwh": 237.91278984873037,
-      "daily_energy_kwh": 220.82738363626473,
-      "monthly_energy_kwh": 237.91278984873037,
-      "yearly_energy_kwh": 237.91278984873037,
+      "total_energy_kwh": 239.39085979956846,
+      "daily_energy_kwh": 222.30545358710282,
+      "monthly_energy_kwh": 239.39085979956846,
+      "yearly_energy_kwh": 239.39085979956846,
       "daily_peak_power_kw": 131.03999372999607,
       "day_key": 2026145,
       "month_key": 202605,
@@ -161,10 +161,10 @@
     },
     {
       "slave_id": 30,
-      "total_energy_kwh": 237.91278984873037,
-      "daily_energy_kwh": 220.82738363626473,
-      "monthly_energy_kwh": 237.91278984873037,
-      "yearly_energy_kwh": 237.91278984873037,
+      "total_energy_kwh": 239.39085979956846,
+      "daily_energy_kwh": 222.30545358710282,
+      "monthly_energy_kwh": 239.39085979956846,
+      "yearly_energy_kwh": 239.39085979956846,
       "daily_peak_power_kw": 131.03999372999607,
       "day_key": 2026145,
       "month_key": 202605,

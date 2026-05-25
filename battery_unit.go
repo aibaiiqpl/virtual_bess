@@ -31,6 +31,8 @@ type BatteryUnit struct {
 	actualPowerKW        float64
 	lastPowerCmdRaw      uint16
 	lastPowerCmdAliasRaw uint16
+	// PCS DC 欠压故障（HV 未合时尝试开机，或运行中 HV 被拉开）；置位后需通过故障复位清除
+	pcsDCUnderVoltFault bool
 
 	// 累计电量
 	totalChargeKWh      float64
@@ -158,6 +160,7 @@ func (bu *BatteryUnit) ProcessPCSControls() {
 	if bu.pcs.ReadU16(RegPCSStartup) == 1 {
 		if !bu.bmsHVClosed {
 			zaplog.Warnf("PCS[%d] startup failed: BMS HV not closed, DC undervoltage fault", bu.pcs.SlaveID)
+			bu.pcsDCUnderVoltFault = true
 		} else if !bu.pcsRunning {
 			zaplog.Infof("PCS[%d] started", bu.pcs.SlaveID)
 			bu.pcsRunning = true
@@ -180,6 +183,7 @@ func (bu *BatteryUnit) ProcessPCSControls() {
 	}
 	if bu.pcs.ReadU16(RegPCSFaultReset) == 1 {
 		zaplog.Infof("PCS[%d] fault reset", bu.pcs.SlaveID)
+		bu.pcsDCUnderVoltFault = false
 		bu.pcs.WriteU16(RegPCSFaultReset, 0)
 	}
 }
