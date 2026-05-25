@@ -154,7 +154,7 @@ const (
 )
 
 // Cluster Input Register layout: each cluster occupies a block with stride 1600.
-// Cluster N starts at N*1600, data offsets 1~20 within each block.
+// Cluster N starts at N*1600, data offsets 1~32 within each block.
 const (
 	IRClusterStride = 1600
 
@@ -178,6 +178,18 @@ const (
 	OffClusterMaxDischargePW  = 18 // U16, 0.1 kW
 	OffClusterMaxChargeI      = 19 // U16, 0.1 A
 	OffClusterMaxDischargeI   = 20 // U16, 0.1 A
+	OffClusterCellVMax        = 21 // U16, 0.001 V, max single-cell voltage
+	OffClusterCellVMaxIdx     = 22 // U16, max-voltage cell index
+	OffClusterCellVMin        = 23 // U16, 0.001 V, min single-cell voltage
+	OffClusterCellVMinIdx     = 24 // U16, min-voltage cell index
+	OffClusterCellVAvg        = 25 // U16, 0.001 V, average single-cell voltage
+	OffClusterCellTMax        = 26 // S16, 0.1 °C, max single-cell temperature
+	OffClusterCellTMaxIdx     = 27 // U16, max-temperature cell index
+	OffClusterCellTMin        = 28 // S16, 0.1 °C, min single-cell temperature
+	OffClusterCellTMinIdx     = 29 // U16, min-temperature cell index
+	OffClusterCellTAvg        = 30 // S16, 0.1 °C, average single-cell temperature
+	OffClusterCellVSpread     = 31 // U16, 0.001 V, cell voltage spread (max - min)
+	OffClusterCellTSpread     = 32 // U16, 0.1 °C, cell temperature spread (max - min)
 )
 
 // Meter status registers (read-only, point of common coupling)

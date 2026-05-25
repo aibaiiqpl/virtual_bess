@@ -30,14 +30,18 @@ func (bu *BatteryUnit) syncBMSCellStats(_ float64) {
 	cellCount := bu.cellCount()
 
 	avgV := bu.cellAvgVoltage()
-	spreadV := avgV * (0.003 + rand.Float64()*0.003) // 0.3% ~ 0.6% 极差
-	maxV := avgV + spreadV/2
-	minV := avgV - spreadV/2
+	// 30 ~ 80 mV 极差，最高/最低相对均值不对称偏移，更接近真实不均衡
+	spreadV := 0.030 + rand.Float64()*0.050
+	biasV := (rand.Float64()*0.6 + 0.2) // 0.2 ~ 0.8，决定最高电芯偏离均值的比例
+	maxV := avgV + spreadV*biasV
+	minV := avgV - spreadV*(1-biasV)
 
 	avgT := 30.0 + (rand.Float64()*2 - 1)
-	spreadT := 1.5 + rand.Float64()*1.5 // 1.5°C ~ 3.0°C 极差
-	maxT := avgT + spreadT/2
-	minT := avgT - spreadT/2
+	// 3 ~ 6°C 极差，最高/最低相对均值不对称
+	spreadT := 3.0 + rand.Float64()*3.0
+	biasT := (rand.Float64()*0.6 + 0.2)
+	maxT := avgT + spreadT*biasT
+	minT := avgT - spreadT*(1-biasT)
 
 	// 编号 1..cellCount，每 tick 抽签一次
 	maxVIdx := uint16(rand.Intn(cellCount) + 1)
@@ -289,7 +293,34 @@ func (bu *BatteryUnit) syncClusterRegisters(soc, batVoltage, powerKW float64) {
 	sessChargeHi, sessChargeLo := uint32ToRegs(sessChargeU32)
 	sessDischHi, sessDischLo := uint32ToRegs(sessDischU32)
 
+	cellCount := bu.cellCount()
+	clusterAvgV := bu.cellAvgVoltage()
+
 	for i := 0; i < n; i++ {
+		// 每簇独立采样单体电压/温度极差，模拟簇间不均衡
+		avgV := clusterAvgV + (rand.Float64()*2-1)*0.005 // ±5mV 簇间漂移
+		spreadV := 0.030 + rand.Float64()*0.050         // 30 ~ 80 mV
+		biasV := rand.Float64()*0.6 + 0.2
+		maxV := avgV + spreadV*biasV
+		minV := avgV - spreadV*(1-biasV)
+
+		avgT := 30.0 + (rand.Float64()*4 - 2) // 簇间 ±2°C 漂移
+		spreadT := 3.0 + rand.Float64()*3.0   // 3 ~ 6°C
+		biasT := rand.Float64()*0.6 + 0.2
+		maxT := avgT + spreadT*biasT
+		minT := avgT - spreadT*(1-biasT)
+
+		maxVIdx := uint16(rand.Intn(cellCount) + 1)
+		minVIdx := uint16(rand.Intn(cellCount) + 1)
+		if minVIdx == maxVIdx {
+			minVIdx = uint16((int(maxVIdx)%cellCount) + 1)
+		}
+		maxTIdx := uint16(rand.Intn(cellCount) + 1)
+		minTIdx := uint16(rand.Intn(cellCount) + 1)
+		if minTIdx == maxTIdx {
+			minTIdx = uint16((int(maxTIdx)%cellCount) + 1)
+		}
+
 		bu.bms.WriteInputU16(clusterIR(i, OffClusterStatus), clusterStatus)
 		bu.bms.WriteInputU16(clusterIR(i, OffClusterSOC), uint16(soc*10))
 		bu.bms.WriteInputU16(clusterIR(i, OffClusterSOH), uint16(bu.soh*10))
@@ -310,5 +341,18 @@ func (bu *BatteryUnit) syncClusterRegisters(soc, batVoltage, powerKW float64) {
 		bu.bms.WriteInputU16(clusterIR(i, OffClusterMaxDischargePW), uint16(maxDischargePW*10))
 		bu.bms.WriteInputU16(clusterIR(i, OffClusterMaxChargeI), uint16(maxChargeI*10))
 		bu.bms.WriteInputU16(clusterIR(i, OffClusterMaxDischargeI), uint16(maxDischargeI*10))
+
+		bu.bms.WriteInputU16(clusterIR(i, OffClusterCellVMax), uint16(maxV*1000))
+		bu.bms.WriteInputU16(clusterIR(i, OffClusterCellVMaxIdx), maxVIdx)
+		bu.bms.WriteInputU16(clusterIR(i, OffClusterCellVMin), uint16(minV*1000))
+		bu.bms.WriteInputU16(clusterIR(i, OffClusterCellVMinIdx), minVIdx)
+		bu.bms.WriteInputU16(clusterIR(i, OffClusterCellVAvg), uint16(avgV*1000))
+		bu.bms.WriteInputU16(clusterIR(i, OffClusterCellTMax), int16ToUint16(int16(maxT*10)))
+		bu.bms.WriteInputU16(clusterIR(i, OffClusterCellTMaxIdx), maxTIdx)
+		bu.bms.WriteInputU16(clusterIR(i, OffClusterCellTMin), int16ToUint16(int16(minT*10)))
+		bu.bms.WriteInputU16(clusterIR(i, OffClusterCellTMinIdx), minTIdx)
+		bu.bms.WriteInputU16(clusterIR(i, OffClusterCellTAvg), int16ToUint16(int16(avgT*10)))
+		bu.bms.WriteInputU16(clusterIR(i, OffClusterCellVSpread), uint16(spreadV*1000))
+		bu.bms.WriteInputU16(clusterIR(i, OffClusterCellTSpread), uint16(spreadT*10))
 	}
 }
