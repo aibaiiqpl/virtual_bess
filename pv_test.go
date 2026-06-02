@@ -17,10 +17,11 @@ func TestPVNaturalPowerCurve(t *testing.T) {
 	}{
 		{name: "before sunrise", at: localTime(2026, 5, 18, 5, 59, 0), want: 0},
 		{name: "sunrise", at: localTime(2026, 5, 18, 6, 0, 0), want: 0},
-		{name: "peak starts", at: localTime(2026, 5, 18, 13, 0, 0), want: 108},
-		{name: "peak middle", at: localTime(2026, 5, 18, 14, 0, 0), want: 108},
-		{name: "peak ends", at: localTime(2026, 5, 18, 15, 0, 0), want: 108},
-		{name: "sunset", at: localTime(2026, 5, 18, 18, 0, 0), want: 0},
+		{name: "solar noon", at: localTime(2026, 5, 18, 13, 0, 0), want: 114},
+		{name: "afternoon one hour", at: localTime(2026, 5, 18, 14, 0, 0), want: 111.1417819887279},
+		{name: "afternoon two hours", at: localTime(2026, 5, 18, 15, 0, 0), want: 102.71045094087579},
+		{name: "evening generation", at: localTime(2026, 5, 18, 18, 0, 0), want: 49.46274625940164},
+		{name: "sunset", at: localTime(2026, 5, 18, 20, 0, 0), want: 0},
 	}
 
 	for _, tt := range tests {

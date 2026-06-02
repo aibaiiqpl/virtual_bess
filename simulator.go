@@ -210,6 +210,21 @@ func (sim *Simulator) syncAll() {
 	}
 }
 
+func (sim *Simulator) writeHolding(slaveID uint8, register, value uint16) error {
+	sim.mu.Lock()
+	defer sim.mu.Unlock()
+
+	bank, ok := sim.banks[slaveID]
+	if !ok || bank.Holding == nil {
+		return errUnknownSlaveID(slaveID)
+	}
+	bank.Holding.UpdateUint16Data(register, value)
+	if cb, ok := sim.writeHandlers[slaveID]; ok {
+		cb(register, value)
+	}
+	return nil
+}
+
 // ---- Modbus 函数处理器 ----
 
 func (sim *Simulator) handleReadHolding(_ *mbserver.Server, frame mbserver.Framer) ([]byte, *mbserver.Exception) {

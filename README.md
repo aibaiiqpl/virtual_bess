@@ -28,6 +28,10 @@ gridPowerKW = loadPowerKW + Σ(PCS.actualPowerKW) − Σ(PV.actualPowerKW)
 modbus:
   address: ":502"
 
+iec61850:
+  enabled: false
+  address: ":102"
+
 grid:
   voltage: 220
 
@@ -71,6 +75,42 @@ go build -o virtual_bess .
 ./virtual_bess -config config.yaml
 ```
 
+启用 IEC 61850 MMS 服务端时：
+
+```bash
+go build -tags iec61850 -o virtual_bess .
+```
+
+并在配置中设置：
+
+```yaml
+iec61850:
+  enabled: true
+  address: ":102"
+  goose:
+    enabled: false
+    interface: "eth0"
+    appid: "0100"
+    dst_mac: "01-0C-CD-01-01-00"
+    vlan_priority: 4
+    vlan_id: 0
+    interval_ms: 1000
+    time_allowed_to_live_ms: 5000
+  devices:
+    - pcs_slave_id: 1
+      address: ":102"
+      goose:
+        enabled: false
+        interface: "eth0"
+        appid: "0100"
+    - pcs_slave_id: 2
+      address: ":1102"
+      goose:
+        enabled: false
+        interface: "eth0"
+        appid: "0101"
+```
+
 ## 操作流程
 
 以第一套电池单元为例（pcs_slave_id=1, bms_slave_id=11）：
@@ -82,6 +122,32 @@ go build -o virtual_bess .
 
 > 未合闸就启动 PCS 会触发直流侧欠压故障（30180 = 1）。
 > PCS 在就地模式（30006 = 0）时功率指令不生效。
+
+## IEC 61850 点位
+
+当前 IEC 61850 服务端按 `docs/IES1000_IES900_CO_V2.5.cid` 和点位说明接入 PCS/BMS 核心点位。遥调使用 MMS write 写 `SP`，遥测使用 MMS read 读 `MX`。GOOSE 发布使用 CID 中的 `TEMPLATEPIGO/LLN0$GO$gocb1` / `dsGOOSE1`，默认目的 MAC `01-0C-CD-01-01-00`、VLAN priority `4`。
+
+如果未配置 `iec61850.devices`，IEC 61850 默认只绑定第一套电池单元。配置 `devices` 后，一个进程会为多套 PCS 启动多套 IEC 61850 端点，每个端点通过 `pcs_slave_id` 绑定对应储能单元。这样 Modbus、MMS、GOOSE 共享同一个仿真器，总电表仍能聚合全部 PCS/PV/负载。
+
+MMS 通过不同 TCP 端口区分端点，例如 `:102`、`:1102`。GOOSE 是二层以太网组播，不使用 MMS TCP 端口；多端点需要配置不同 `APPID`，通常也会结合 `goCbRef`、目的 MAC、VLAN 一起区分。启用 GOOSE 时必须配置实际网卡名，通常也需要运行进程具备原始以太网发包权限。
+
+| 对象引用 | FC | 方向 | 含义 |
+|----------|----|------|------|
+| `TEMPLATECTRL/GGIO1.APCS1.setMag.f` | SP | 写 | 有功功率设定，kW，正充负放 |
+| `TEMPLATECTRL/GGIO1.APCS2.setMag.f` | SP | 写 | 无功功率设定，kVar，仅回显 |
+| `TEMPLATECTRL/GGIO1.APCS9.setMag.f` | SP | 写 | PCS 控制命令：0 关机，1 开机，2 复位，3 待机 |
+| `TEMPLATECTRL/GGIO1.APCS10.setMag.f` | SP | 写 | PCS 运行模式：0 并网，1 离网 |
+| `TEMPLATEPIGO/GGIO1.AnIn1.mag.f` | MX | 读 | 额定功率，kW |
+| `TEMPLATEPIGO/GGIO1.AnIn2.mag.f` | MX | 读 | 电池组 SOC，% |
+| `TEMPLATEPIGO/GGIO1.AnIn3.mag.i` | MX | 读 | PCS 系统状态-值模式 |
+| `TEMPLATEPIGO/GGIO1.AnIn4.mag.f` | MX | 读 | 输出总有功功率，kW |
+| `TEMPLATEPIGO/GGIO1.AnIn5.mag.f` | MX | 读 | 输出总无功功率，kVar |
+| `TEMPLATEPIGO/GGIO1.AnIn6.mag.f` | MX | 读 | 电池组最大充电功率，kW |
+| `TEMPLATEPIGO/GGIO1.AnIn7.mag.f` | MX | 读 | 电池组最大放电功率，kW |
+| `TEMPLATEPIGO/GGIO1.AnIn8.mag.f` | MX | 读 | 有功功率设定值，kW |
+| `TEMPLATEPIGO/GGIO1.AnIn9.mag.f` | MX | 读 | 无功功率设定值，kVar |
+
+GOOSE `dsGOOSE1` 发布同一组 `TEMPLATEPIGO/GGIO1.AnIn1` - `AnIn9` 遥测值，顺序与上表一致。
 
 ## Modbus 点位表
 

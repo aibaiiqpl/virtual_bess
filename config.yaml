@@ -1,6 +1,45 @@
 modbus:
   address: ":502"
 
+iec61850:
+  enabled: false
+  address: ":102"
+  goose:
+    enabled: false
+    interface: ""                  # e.g. "eth0"; required when goose.enabled=true
+    appid: "0100"
+    dst_mac: "01-0C-CD-01-01-00"
+    vlan_priority: 4
+    vlan_id: 0
+    disable_vlan: false
+    interval_ms: 1000
+    time_allowed_to_live_ms: 5000
+  devices:
+    - pcs_slave_id: 1
+      address: ":102"
+      goose:
+        enabled: false
+        interface: ""
+        appid: "0100"
+        dst_mac: "01-0C-CD-01-01-00"
+        vlan_priority: 4
+        vlan_id: 0
+        disable_vlan: false
+        interval_ms: 1000
+        time_allowed_to_live_ms: 5000
+    - pcs_slave_id: 2
+      address: ":1102"
+      goose:
+        enabled: false
+        interface: ""
+        appid: "0101"
+        dst_mac: "01-0C-CD-01-01-00"
+        vlan_priority: 4
+        vlan_id: 0
+        disable_vlan: false
+        interval_ms: 1000
+        time_allowed_to_live_ms: 5000
+
 grid:
   voltage: 10000               # 电表所在侧的相电压 V（PCC 点）
 
