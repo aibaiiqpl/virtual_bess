@@ -17,18 +17,39 @@ func TestPVNaturalPowerCurve(t *testing.T) {
 	}{
 		{name: "before sunrise", at: localTime(2026, 5, 18, 5, 59, 0), want: 0},
 		{name: "sunrise", at: localTime(2026, 5, 18, 6, 0, 0), want: 0},
-		{name: "solar noon", at: localTime(2026, 5, 18, 13, 0, 0), want: 114},
-		{name: "afternoon one hour", at: localTime(2026, 5, 18, 14, 0, 0), want: 111.1417819887279},
-		{name: "afternoon two hours", at: localTime(2026, 5, 18, 15, 0, 0), want: 102.71045094087579},
-		{name: "evening generation", at: localTime(2026, 5, 18, 18, 0, 0), want: 49.46274625940164},
-		{name: "sunset", at: localTime(2026, 5, 18, 20, 0, 0), want: 0},
+		{name: "solar noon", at: localTime(2026, 5, 18, 12, 0, 0), want: 114},
+		{name: "afternoon one hour", at: localTime(2026, 5, 18, 13, 0, 0), want: 110.11542731880104},
+		{name: "afternoon two hours", at: localTime(2026, 5, 18, 14, 0, 0), want: 98.726896031426},
+		{name: "early evening tail", at: localTime(2026, 5, 18, 17, 0, 0), want: 29.50538183364341},
+		{name: "sunset", at: localTime(2026, 5, 18, 18, 0, 0), want: 0},
+		{name: "after sunset", at: localTime(2026, 5, 18, 18, 1, 0), want: 0},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := pv.naturalPowerKW(tt.at, 1.0) // 强制晴天系数
+			got := pv.naturalPowerKW(tt.at, 1.0) // 强制使用晴空系数。
 			assertFloatNear(t, got, tt.want)
 		})
+	}
+}
+
+func TestPVNaturalPowerUsesConfiguredTimezone(t *testing.T) {
+	oldLocation := pvLocation
+	t.Cleanup(func() {
+		pvLocation = oldLocation
+	})
+	SetPVTimezone("Europe/Lisbon")
+
+	pv := newTestPV(t)
+
+	beforeSunsetUTC := time.Date(2026, 5, 18, 16, 30, 0, 0, time.UTC) // WEST 本地 17:30。
+	if got := pv.naturalPowerKW(beforeSunsetUTC, 1.0); got <= 0 {
+		t.Fatalf("power before local sunset = %v, want positive", got)
+	}
+
+	afterSunsetUTC := time.Date(2026, 5, 18, 17, 1, 0, 0, time.UTC) // WEST 本地 18:01。
+	if got := pv.naturalPowerKW(afterSunsetUTC, 1.0); got != 0 {
+		t.Fatalf("power after local sunset = %v, want 0", got)
 	}
 }
 
@@ -85,7 +106,7 @@ func TestPVLimitWriteHandlersTrackLatestRegister(t *testing.T) {
 	pv := sim.pvs[0]
 	noon := localTime(2026, 5, 18, 13, 0, 0)
 
-	// FC16 写 [60002,60003] = [500, 700] → 最后写的是 60003 (fixed)
+	// FC16 写 [60002,60003] = [500, 700]，所以最后写入的 60003 (fixed) 生效。
 	multi := &mbserver.TCPFrame{Function: 16, Device: pv.bank.SlaveID}
 	mbserver.SetDataWithRegisterAndNumberAndValues(multi, RegPVPercentLimit, 2, []uint16{500, 700})
 	if _, exc := sim.handleWriteMultipleHolding(sim.server, multi); exc != &mbserver.Success {
@@ -94,7 +115,7 @@ func TestPVLimitWriteHandlersTrackLatestRegister(t *testing.T) {
 	pv.UpdateSimulation(noon, 1, 1.0)
 	assertFloatNear(t, pv.actualPowerKW, 70)
 
-	// FC6 写 60002 = 250 → 切回 percent 模式
+	// FC6 写 60002 = 250，切回 percent 模式。
 	single := &mbserver.TCPFrame{Function: 6, Device: pv.bank.SlaveID}
 	mbserver.SetDataWithRegisterAndNumber(single, RegPVPercentLimit, 250)
 	if _, exc := sim.handleWriteSingleHolding(sim.server, single); exc != &mbserver.Success {

@@ -54,15 +54,42 @@ func TestWeatherInitialStateNotAlwaysFixed(t *testing.T) {
 func TestWeatherSmoothingDampensSwings(t *testing.T) {
 	// Force a large state change and verify the coefficient doesn't jump in one tick.
 	w := &Weather{
-		state:  weatherSunny,
-		remain: 9999,
-		coeff:  weatherBaseCoeff(weatherSunny), // ~0.97
+		state:      weatherRainy,
+		remain:     9999,
+		coeff:      weatherBaseCoeff(weatherSunny),
+		slowCoeff:  weatherBaseCoeff(weatherSunny),
+		slowTarget: weatherBaseCoeff(weatherRainy),
 	}
-	w.state = weatherRainy // simulate transition; target is ~0.08
 	w.Update(1.0)
 
-	// One tick should move ~10% toward target (alpha=0.1), not all the way.
-	if w.coeff < 0.5 {
-		t.Errorf("weatherCoeff jumped too fast: %v (expected gradual EMA transition)", w.coeff)
+	if w.coeff < 0.9 {
+		t.Errorf("weatherCoeff jumped too fast: %v (expected gradual background transition)", w.coeff)
+	}
+}
+
+func TestWeatherCloudShadowDropsFastAndRecoversGradually(t *testing.T) {
+	w := &Weather{
+		state:       weatherPartlyCloudy,
+		remain:      9999,
+		slowCoeff:   0.8,
+		slowTarget:  0.8,
+		shadeTarget: 0.5,
+	}
+
+	w.updateShadeDepth(1.0)
+	w.updateCoeff()
+	if w.coeff >= 0.72 {
+		t.Fatalf("cloud shadow did not create a visible short-term dip: coeff=%v", w.coeff)
+	}
+
+	dipped := w.coeff
+	w.shadeTarget = 0
+	w.updateShadeDepth(1.0)
+	w.updateCoeff()
+	if w.coeff <= dipped {
+		t.Fatalf("cloud shadow did not start recovering: before=%v after=%v", dipped, w.coeff)
+	}
+	if w.coeff >= 0.8 {
+		t.Fatalf("cloud shadow recovered instantly: coeff=%v", w.coeff)
 	}
 }

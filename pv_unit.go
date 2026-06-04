@@ -7,10 +7,10 @@ import (
 
 const pvInverterEfficiency = 0.98
 
-// pvLocation 持有站点时区，用于把 UTC 时间转换为本地太阳时。
+// pvLocation 持有站点时区，用于把时间转换为本地太阳时。
 var pvLocation *time.Location = time.Local
 
-// SetPVTimezone 在程序启动时由 config 调用一次，设置 PV 计算时区。
+// SetPVTimezone 设置 PV 发电计算使用的时区。
 func SetPVTimezone(tz string) {
 	if tz == "" {
 		pvLocation = time.Local
@@ -59,11 +59,11 @@ func NewPVUnit(cfg PVUnitConfig, pcsACVoltage float64, bank *SlaveBank) *PVUnit 
 		bank:              bank,
 		ratedPowerKW:      cfg.RatedPowerKW,
 		pcsACVoltage:      pcsACVoltage,
-		batteryVoltageNom: 800, // DC bus 显示用，固定值；不与 BMS 关联
+		batteryVoltageNom: 800, // DC bus 显示用固定值，不与 BMS 状态联动。
 		running:           true,
 		limitMode:         pvLimitPercent,
 	}
-	// 默认 100% 限值
+	// 默认 100% 限值。
 	bank.WriteU16(RegPVPercentLimit, 1000)
 	pv.lastPercentLimitRaw = 1000
 	return pv
@@ -72,8 +72,8 @@ func NewPVUnit(cfg PVUnitConfig, pcsACVoltage float64, bank *SlaveBank) *PVUnit 
 func (pv *PVUnit) ActualPowerKW() float64 { return pv.actualPowerKW }
 
 // OnPVWrite 处理 PV slave 的寄存器写。
-// 已在 sim.mu 保护下、且 bank 已经被更新。
-// 这里处理两个限值寄存器的"写入即模式切换"+ clamp 逻辑。
+// 调用方已持有 sim.mu，且 bank 已完成写入。
+// 限值寄存器写入时切换模式，并对保存值做 clamp。
 func (pv *PVUnit) OnPVWrite(addr, value uint16) {
 	switch addr {
 	case RegPVPercentLimit:
@@ -89,7 +89,7 @@ func (pv *PVUnit) OnPVWrite(addr, value uint16) {
 	}
 }
 
-// ProcessControls 处理开机/关机脉冲以及兜底的限值同步（防止有人绕过写回调直改寄存器）。
+// ProcessControls 处理开停机脉冲，并兜底同步直接写寄存器造成的限值变化。
 func (pv *PVUnit) ProcessControls() {
 	if pv.bank.ReadU16(RegPVStartup) == 1 {
 		pv.running = true
@@ -153,12 +153,10 @@ func (pv *PVUnit) naturalPowerKW(now time.Time, weatherCoeff float64) float64 {
 		float64(local.Second())/3600.0 +
 		float64(local.Nanosecond())/float64(time.Hour)
 
-	// 日出 6:00，日落 20:00，正午 13:00（适合葡萄牙夏令时）
-	const sunrise, sunset, solar_noon = 6.0, 20.0, 13.0
+	const sunrise, sunset = 6.0, 18.0
 	if hour <= sunrise || hour >= sunset {
 		return 0
 	}
-	// 以正午为中心的 sin 曲线：f(t) = sin(π * (t-sunrise)/(sunset-sunrise))
 	angle := math.Pi * (hour - sunrise) / (sunset - sunrise)
 	natural := pv.ratedPowerKW * 0.95 * math.Sin(angle)
 	return natural * weatherCoeff
