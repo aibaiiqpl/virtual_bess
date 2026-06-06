@@ -72,6 +72,7 @@ type ModbusConfig struct {
 type IEC61850Config struct {
 	Enabled bool                   `yaml:"enabled"`
 	Address string                 `yaml:"address"`
+	IEDName string                 `yaml:"ied_name"` // 全局默认 IED 名；空且单端点时回退 TEMPLATE
 	GOOSE   IEC61850GOOSEConfig    `yaml:"goose"`
 	Devices []IEC61850DeviceConfig `yaml:"devices"`
 }
@@ -79,6 +80,7 @@ type IEC61850Config struct {
 type IEC61850DeviceConfig struct {
 	PCSSlaveID uint8               `yaml:"pcs_slave_id"`
 	Address    string              `yaml:"address"`
+	IEDName    string              `yaml:"ied_name"` // 本端点 IED 名（如 pcs01），决定 MMS 域名与对象引用前缀
 	GOOSE      IEC61850GOOSEConfig `yaml:"goose"`
 }
 
@@ -309,13 +311,25 @@ func (c IEC61850Config) validate(pcsIDs map[uint8]bool) error {
 		return nil
 	}
 	if len(c.Devices) == 0 {
+		if name := effectiveIEDName(c, IEC61850DeviceConfig{}, false); !isValidIEDName(name) {
+			return fmt.Errorf("iec61850.ied_name %q is not a valid IED name", name)
+		}
 		return validateIEC61850GOOSEConfig("iec61850.goose", c.GOOSE)
 	}
 
 	seenAddresses := map[string]bool{}
 	seenGOOSEAppIDs := map[uint16]bool{}
+	seenIEDNames := map[string]bool{}
 	for i, device := range c.Devices {
 		label := fmt.Sprintf("iec61850.devices[%d]", i)
+		iedName := effectiveIEDName(c, device, true)
+		if !isValidIEDName(iedName) {
+			return fmt.Errorf("%s.ied_name %q is not a valid IED name", label, iedName)
+		}
+		if seenIEDNames[iedName] {
+			return fmt.Errorf("%s ied_name %q duplicated; each endpoint needs a unique IED name", label, iedName)
+		}
+		seenIEDNames[iedName] = true
 		if device.PCSSlaveID == 0 {
 			return fmt.Errorf("%s.pcs_slave_id must be set", label)
 		}
@@ -348,6 +362,41 @@ func (c IEC61850Config) validate(pcsIDs map[uint8]bool) error {
 		}
 	}
 	return nil
+}
+
+// effectiveIEDName 解析端点最终 IED 名：设备级 > 全局 > 自动默认。
+// 多端点未显式配置时按 PCS<slaveID> 自动取唯一名；单端点回退 TEMPLATE 兼容旧行为。
+// IED 名决定 MMS 域名（IEDName+LD inst）与全部对象引用前缀，因此每个端点必须唯一。
+func effectiveIEDName(cfg IEC61850Config, device IEC61850DeviceConfig, multi bool) string {
+	switch {
+	case device.IEDName != "":
+		return device.IEDName
+	case cfg.IEDName != "":
+		return cfg.IEDName
+	case multi:
+		return fmt.Sprintf("PCS%02d", device.PCSSlaveID)
+	default:
+		return "TEMPLATE"
+	}
+}
+
+// isValidIEDName 限制 IED 名为合法 MMS 标识符：首字符为字母，其余为字母/数字/下划线，长度 ≤ 32。
+// MMS 域名是 IEDName 拼上 LD inst（如 CTRL/MEAS），过长或非法字符会让 libiec61850 拒绝建模。
+func isValidIEDName(name string) bool {
+	if name == "" || len(name) > 32 {
+		return false
+	}
+	for i, r := range name {
+		isAlpha := (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')
+		isDigit := r >= '0' && r <= '9'
+		if i == 0 && !isAlpha {
+			return false
+		}
+		if !isAlpha && !isDigit && r != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 func validateIEC61850GOOSEConfig(label string, cfg IEC61850GOOSEConfig) error {

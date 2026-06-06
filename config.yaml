@@ -4,6 +4,7 @@ modbus:
 iec61850:
   enabled: false
   address: ":102"
+  ied_name: ""                     # IED 名（MMS 域名/对象引用前缀）；空且单端点时回退 TEMPLATE
   goose:
     enabled: false
     interface: ""                  # e.g. "eth0"; required when goose.enabled=true
@@ -17,6 +18,7 @@ iec61850:
   devices:
     - pcs_slave_id: 1
       address: ":102"
+      ied_name: "pcs01"            # 每个端点独立 IED 名；不填则多端点自动取 PCS<slaveID>（PCS01…）
       goose:
         enabled: false
         interface: ""
@@ -29,6 +31,7 @@ iec61850:
         time_allowed_to_live_ms: 5000
     - pcs_slave_id: 2
       address: ":1102"
+      ied_name: "pcs02"
       goose:
         enabled: false
         interface: ""

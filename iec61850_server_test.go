@@ -12,7 +12,7 @@ import (
 )
 
 func TestIEC61850ModelContainsCoreCIDReferences(t *testing.T) {
-	model, err := loadIEC61850Model()
+	model, err := loadIEC61850Model("TEMPLATE")
 	if err != nil {
 		t.Fatalf("loadIEC61850Model() error = %v", err)
 	}
@@ -38,6 +38,62 @@ func TestIEC61850ModelContainsCoreCIDReferences(t *testing.T) {
 			t.Fatalf("model node %s not found", ref)
 		}
 	}
+}
+
+func TestIEC61850ConfiguredIEDNameRenamesObjectReferences(t *testing.T) {
+	model, err := loadIEC61850Model("pcs01")
+	if err != nil {
+		t.Fatalf("loadIEC61850Model(pcs01) error = %v", err)
+	}
+	defer model.Destroy()
+
+	// 配置 ied_name=pcs01 后，对象引用前缀应整体从 TEMPLATE 变为 pcs01。
+	if model.GetModelNodeByObjectReference("pcs01CTRL/setGGIO1.APCS1.Oper.ctlVal.f") == nil {
+		t.Fatal("pcs01CTRL/setGGIO1.APCS1.Oper.ctlVal.f not found")
+	}
+	if model.GetModelNodeByObjectReference("pcs01PIGO/measGGIO1.AnIn1.mag.f") == nil {
+		t.Fatal("pcs01PIGO/measGGIO1.AnIn1.mag.f not found")
+	}
+	// 旧前缀不应再存在。
+	if model.GetModelNodeByObjectReference("TEMPLATECTRL/setGGIO1.APCS1.Oper.ctlVal.f") != nil {
+		t.Fatal("TEMPLATE prefix should be gone after rename")
+	}
+}
+
+func TestIEC61850MultiEndpointDistinctIEDNamesControlIndependently(t *testing.T) {
+	port1 := freeTCPPort(t)
+	port2 := freeTCPPort(t)
+	sim := NewSimulator(twoBatteryConfig(), mustNewServer())
+	svc, err := startIEC61850Server(IEC61850Config{
+		Enabled: true,
+		Devices: []IEC61850DeviceConfig{
+			{PCSSlaveID: 1, Address: fmt.Sprintf("127.0.0.1:%d", port1), IEDName: "pcs01"},
+			{PCSSlaveID: 2, Address: fmt.Sprintf("127.0.0.1:%d", port2), IEDName: "pcs02"},
+		},
+	}, sim)
+	if err != nil {
+		t.Fatalf("startIEC61850Server() error = %v", err)
+	}
+	defer svc.Close()
+	svc.Sync()
+
+	client1 := newIEC61850TestClient(t, port1)
+	defer client1.Close()
+	client2 := newIEC61850TestClient(t, port2)
+	defer client2.Close()
+
+	// 每个端点用自己的 IED 名前缀寻址，证明多 BESS 单元各自独立建模。
+	if err := client1.ControlByControlModelAPC("pcs01CTRL/setGGIO1.APCS1",
+		iec61850.CONTROL_MODEL_DIRECT_NORMAL, iec61850.NewControlObjectParamAPC(11)); err != nil {
+		t.Fatalf("client1 Control(pcs01) error = %v", err)
+	}
+	if err := client2.ControlByControlModelAPC("pcs02CTRL/setGGIO1.APCS1",
+		iec61850.CONTROL_MODEL_DIRECT_NORMAL, iec61850.NewControlObjectParamAPC(22)); err != nil {
+		t.Fatalf("client2 Control(pcs02) error = %v", err)
+	}
+
+	waitRegister(t, sim.batteries[0].pcs, RegPCSPowerCmd, 110)
+	waitRegister(t, sim.batteries[1].pcs, RegPCSPowerCmd, 220)
 }
 
 func TestIEC61850ActivePowerControlWritesPCSCommand(t *testing.T) {
@@ -199,11 +255,12 @@ func TestIEC61850MultipleMMSEndpointsControlDifferentPCSUnits(t *testing.T) {
 	client2 := newIEC61850TestClient(t, port2)
 	defer client2.Close()
 
-	if err := client1.ControlByControlModelAPC("TEMPLATECTRL/setGGIO1.APCS1",
+	// 多端点未显式配 ied_name 时按 PCS<slaveID> 自动取唯一名（PCS01 / PCS02）。
+	if err := client1.ControlByControlModelAPC("PCS01CTRL/setGGIO1.APCS1",
 		iec61850.CONTROL_MODEL_DIRECT_NORMAL, iec61850.NewControlObjectParamAPC(11)); err != nil {
 		t.Fatalf("client1 Control(APCS1) error = %v", err)
 	}
-	if err := client2.ControlByControlModelAPC("TEMPLATECTRL/setGGIO1.APCS1",
+	if err := client2.ControlByControlModelAPC("PCS02CTRL/setGGIO1.APCS1",
 		iec61850.CONTROL_MODEL_DIRECT_NORMAL, iec61850.NewControlObjectParamAPC(22)); err != nil {
 		t.Fatalf("client2 Control(APCS1) error = %v", err)
 	}

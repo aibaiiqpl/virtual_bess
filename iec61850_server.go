@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bytes"
 	_ "embed"
 	"fmt"
 	"math"
@@ -21,20 +22,20 @@ import (
 //go:embed iec61850_model.cfg
 var iec61850ModelConfig []byte
 
-// CID 模型中各逻辑节点的对象引用前缀（IED 名 TEMPLATE + LD inst + 带前缀 LN）。
-const (
-	refCtrlSet  = "TEMPLATECTRL/setGGIO1"  // 遥调（APC，setpoint，direct-with-normal-security）
-	refCtrlGapc = "TEMPLATECTRL/ctlGAPC1"  // 遥控（SPC，开关机/复位/待机）
-	refMeasPcs  = "TEMPLATEMEAS/measGGIO1" // PCS 遥测
-	refMeasBms  = "TEMPLATEMEAS/measGGIO2" // BMS 遥测
-	refPigo     = "TEMPLATEPIGO/measGGIO1" // GOOSE 遥测（与 dsGOOSE1 顺序一致）
-)
-
 type iec61850Server struct {
 	sim     *Simulator
 	battery *BatteryUnit
 	server  *iec61850.IedServer
 	model   *iec61850.IedModel
+
+	// IED 名（如 TEMPLATE / pcs01），决定 MMS 域名与全部对象引用前缀。
+	iedName string
+	// CID 模型中各逻辑节点的对象引用前缀（IED 名 + LD inst + 带前缀 LN），随 iedName 计算。
+	refCtrlSet  string // 遥调（APC，setpoint，direct-with-normal-security）
+	refCtrlGapc string // 遥控（SPC，开关机/复位/待机）
+	refMeasPcs  string // PCS 遥测
+	refMeasBms  string // BMS 遥测
+	refPigo     string // GOOSE 遥测（与 dsGOOSE1 顺序一致）
 
 	// 对象引用 -> 模型节点缓存，避免每个 Sync tick 重复字符串解析。
 	nodeCache map[string]*iec61850.ModelNode
@@ -84,7 +85,12 @@ func startIEC61850Server(cfg IEC61850Config, sim *Simulator) (IEC61850Service, e
 
 func effectiveIEC61850Devices(cfg IEC61850Config, sim *Simulator) []IEC61850DeviceConfig {
 	if len(cfg.Devices) > 0 {
-		return cfg.Devices
+		devices := make([]IEC61850DeviceConfig, len(cfg.Devices))
+		copy(devices, cfg.Devices)
+		for i := range devices {
+			devices[i].IEDName = effectiveIEDName(cfg, devices[i], true)
+		}
+		return devices
 	}
 	device := IEC61850DeviceConfig{
 		Address: cfg.Address,
@@ -93,6 +99,7 @@ func effectiveIEC61850Devices(cfg IEC61850Config, sim *Simulator) []IEC61850Devi
 	if sim != nil && len(sim.batteries) > 0 {
 		device.PCSSlaveID = sim.batteries[0].pcs.SlaveID
 	}
+	device.IEDName = effectiveIEDName(cfg, device, false)
 	return []IEC61850DeviceConfig{device}
 }
 
@@ -106,7 +113,11 @@ func startIEC61850Device(cfg IEC61850DeviceConfig, sim *Simulator) (*iec61850Ser
 		return nil, err
 	}
 
-	model, err := loadIEC61850Model()
+	iedName := cfg.IEDName
+	if iedName == "" {
+		iedName = "TEMPLATE"
+	}
+	model, err := loadIEC61850Model(iedName)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +130,7 @@ func startIEC61850Device(cfg IEC61850DeviceConfig, sim *Simulator) (*iec61850Ser
 		}
 	}
 
-	svc, err := newIEC61850Service(sim, battery, model, server)
+	svc, err := newIEC61850Service(sim, battery, model, server, iedName)
 	if err != nil {
 		server.Destroy()
 		model.Destroy()
@@ -159,15 +170,22 @@ func findIEC61850Battery(sim *Simulator, pcsSlaveID uint8) (*BatteryUnit, error)
 	return nil, fmt.Errorf("IEC 61850 references unknown PCS slave %d", pcsSlaveID)
 }
 
-func loadIEC61850Model() (*iec61850.IedModel, error) {
+// loadIEC61850Model 把内嵌模型加载为运行时 IedModel；iedName 用于把模板里的 IED 名
+// TEMPLATE 替换成本端点实际 IED 名，从而让每套 PCS 暴露独立的 MMS 域名与对象引用。
+func loadIEC61850Model(iedName string) (*iec61850.IedModel, error) {
 	tmpDir, err := os.MkdirTemp("", "virtual-bess-iec61850-*")
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(tmpDir)
 
+	cfgBytes := iec61850ModelConfig
+	if iedName != "" && iedName != "TEMPLATE" {
+		// 模板首行为 MODEL(TEMPLATE){，IED 名在 .cfg 中只此一处，替换即改写全部对象引用前缀。
+		cfgBytes = bytes.Replace(cfgBytes, []byte("MODEL(TEMPLATE)"), []byte("MODEL("+iedName+")"), 1)
+	}
 	modelPath := filepath.Join(tmpDir, "model.cfg")
-	if err := os.WriteFile(modelPath, iec61850ModelConfig, 0600); err != nil {
+	if err := os.WriteFile(modelPath, cfgBytes, 0600); err != nil {
 		return nil, err
 	}
 	model, err := iec61850.CreateModelFromConfigFileEx(modelPath)
@@ -180,13 +198,22 @@ func loadIEC61850Model() (*iec61850.IedModel, error) {
 	return model, nil
 }
 
-func newIEC61850Service(sim *Simulator, battery *BatteryUnit, model *iec61850.IedModel, server *iec61850.IedServer) (*iec61850Server, error) {
+func newIEC61850Service(sim *Simulator, battery *BatteryUnit, model *iec61850.IedModel, server *iec61850.IedServer, iedName string) (*iec61850Server, error) {
+	if iedName == "" {
+		iedName = "TEMPLATE"
+	}
 	return &iec61850Server{
-		sim:       sim,
-		battery:   battery,
-		model:     model,
-		server:    server,
-		nodeCache: make(map[string]*iec61850.ModelNode),
+		sim:         sim,
+		battery:     battery,
+		model:       model,
+		server:      server,
+		iedName:     iedName,
+		refCtrlSet:  iedName + "CTRL/setGGIO1",
+		refCtrlGapc: iedName + "CTRL/ctlGAPC1",
+		refMeasPcs:  iedName + "MEAS/measGGIO1",
+		refMeasBms:  iedName + "MEAS/measGGIO2",
+		refPigo:     iedName + "PIGO/measGGIO1",
+		nodeCache:   make(map[string]*iec61850.ModelNode),
 	}, nil
 }
 
@@ -207,13 +234,13 @@ func (s *iec61850Server) installControlHandlers() error {
 		ref     string
 		handler iec61850.ControlHandler
 	}{
-		{refCtrlSet + ".APCS1", s.ctlActivePower},   // 有功功率设定
-		{refCtrlSet + ".APCS2", s.ctlReactivePower}, // 无功功率设定
-		{refCtrlSet + ".APCS9", s.ctlPCSCommand},    // PCS 控制命令 0关1开2复位3待机
-		{refCtrlSet + ".APCS10", s.ctlRunMode},      // PCS 运行模式 0并网1离网
-		{refCtrlGapc + ".SPCSO2", s.ctlStartStop},   // PCS 开关机
-		{refCtrlGapc + ".SPCSO5", s.ctlFaultReset},  // 故障复位
-		{refCtrlGapc + ".SPCSO6", s.ctlStandby},     // 待机命令
+		{s.refCtrlSet + ".APCS1", s.ctlActivePower},   // 有功功率设定
+		{s.refCtrlSet + ".APCS2", s.ctlReactivePower}, // 无功功率设定
+		{s.refCtrlSet + ".APCS9", s.ctlPCSCommand},    // PCS 控制命令 0关1开2复位3待机
+		{s.refCtrlSet + ".APCS10", s.ctlRunMode},      // PCS 运行模式 0并网1离网
+		{s.refCtrlGapc + ".SPCSO2", s.ctlStartStop},   // PCS 开关机
+		{s.refCtrlGapc + ".SPCSO5", s.ctlFaultReset},  // 故障复位
+		{s.refCtrlGapc + ".SPCSO6", s.ctlStandby},     // 待机命令
 	}
 	for _, b := range bindings {
 		n := s.node(b.ref)
@@ -360,52 +387,52 @@ func (s *iec61850Server) gooseValues(bu *BatteryUnit, nowMs int64) iec61850Telem
 func (s *iec61850Server) updatePcsMeas(bu *BatteryUnit, nowMs int64) {
 	pcs := bu.pcs
 	bms := bu.bms
-	s.setFloat(refMeasPcs+".AnIn1", float32(pcs.ReadU16(RegPCSVoltageA))/10, nowMs)
-	s.setFloat(refMeasPcs+".AnIn2", float32(pcs.ReadU16(RegPCSVoltageB))/10, nowMs)
-	s.setFloat(refMeasPcs+".AnIn3", float32(pcs.ReadU16(RegPCSVoltageC))/10, nowMs)
-	s.setFloat(refMeasPcs+".AnIn4", float32(uint16ToInt16(pcs.ReadU16(RegPCSCurrentA)))/10, nowMs)
-	s.setFloat(refMeasPcs+".AnIn5", float32(uint16ToInt16(pcs.ReadU16(RegPCSCurrentB)))/10, nowMs)
-	s.setFloat(refMeasPcs+".AnIn6", float32(uint16ToInt16(pcs.ReadU16(RegPCSCurrentC)))/10, nowMs)
-	s.setFloat(refMeasPcs+".AnIn7", float32(uint16ToInt16(pcs.ReadU16(RegPCSTotalActivePW)))/10, nowMs)
-	s.setFloat(refMeasPcs+".AnIn8", float32(uint16ToInt16(pcs.ReadU16(RegPCSTotalReactPW)))/10, nowMs)
-	s.setFloat(refMeasPcs+".AnIn9", float32(uint16ToInt16(pcs.ReadU16(RegPCSPowerFactor)))/100, nowMs)
-	s.setFloat(refMeasPcs+".AnIn10", float32(uint16ToInt16(bms.ReadU16(RegBMSPower)))/10, nowMs)
-	s.setFloat(refMeasPcs+".AnIn11", float32(pcs.ReadU16(RegPCSTotalApparent))/10, nowMs)
-	s.setFloat(refMeasPcs+".AnIn12", float32(bms.ReadU16(RegBMSMaxDischargePW))/10, nowMs)
-	s.setFloat(refMeasPcs+".AnIn13", float32(bms.ReadU16(RegBMSMaxChargePW))/10, nowMs)
-	s.setFloat(refMeasPcs+".AnIn14", float32(bms.ReadU16(RegBMSMaxChargePW))/10, nowMs)
-	s.setFloat(refMeasPcs+".AnIn15", float32(bms.ReadU16(RegBMSMaxDischargePW))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn1", float32(pcs.ReadU16(RegPCSVoltageA))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn2", float32(pcs.ReadU16(RegPCSVoltageB))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn3", float32(pcs.ReadU16(RegPCSVoltageC))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn4", float32(uint16ToInt16(pcs.ReadU16(RegPCSCurrentA)))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn5", float32(uint16ToInt16(pcs.ReadU16(RegPCSCurrentB)))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn6", float32(uint16ToInt16(pcs.ReadU16(RegPCSCurrentC)))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn7", float32(uint16ToInt16(pcs.ReadU16(RegPCSTotalActivePW)))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn8", float32(uint16ToInt16(pcs.ReadU16(RegPCSTotalReactPW)))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn9", float32(uint16ToInt16(pcs.ReadU16(RegPCSPowerFactor)))/100, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn10", float32(uint16ToInt16(bms.ReadU16(RegBMSPower)))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn11", float32(pcs.ReadU16(RegPCSTotalApparent))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn12", float32(bms.ReadU16(RegBMSMaxDischargePW))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn13", float32(bms.ReadU16(RegBMSMaxChargePW))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn14", float32(bms.ReadU16(RegBMSMaxChargePW))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn15", float32(bms.ReadU16(RegBMSMaxDischargePW))/10, nowMs)
 }
 
 // updateBmsMeas 填 MEAS/measGGIO2（BMS 遥测）核心点位。
 func (s *iec61850Server) updateBmsMeas(bu *BatteryUnit, nowMs int64) {
 	bms := bu.bms
-	s.setFloat(refMeasBms+".AnIn1", float32(bms.ReadU16(RegBMSSOC))/10, nowMs)
-	s.setFloat(refMeasBms+".AnIn2", float32(bms.ReadU16(RegBMSMaxChargePW))/10, nowMs)
-	s.setFloat(refMeasBms+".AnIn3", float32(bms.ReadU16(RegBMSMaxDischargePW))/10, nowMs)
-	s.setFloat(refMeasBms+".AnIn4", float32(bms.ReadU16(RegBMSSysStatus)), nowMs)
-	s.setFloat(refMeasBms+".AnIn5", float32(bms.ReadU16(RegBMSAlarmStatus)), nowMs)
-	s.setFloat(refMeasBms+".AnIn6", float32(bms.ReadU16(RegBMSVoltage))/10, nowMs)
-	s.setFloat(refMeasBms+".AnIn7", float32(uint16ToInt16(bms.ReadU16(RegBMSCurrent)))/10, nowMs)
-	s.setFloat(refMeasBms+".AnIn8", float32(bms.ReadU16(RegBMSMaxChargeI))/10, nowMs)
-	s.setFloat(refMeasBms+".AnIn9", float32(bms.ReadU16(RegBMSMaxDischargeI))/10, nowMs)
-	s.setFloat(refMeasBms+".AnIn10", float32(bms.ReadU16(RegBMSCellVMax))/1000, nowMs)
-	s.setFloat(refMeasBms+".AnIn11", float32(bms.ReadU16(RegBMSCellVMin))/1000, nowMs)
-	s.setFloat(refMeasBms+".AnIn12", float32(bms.ReadU16(RegBMSSOH))/10, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn1", float32(bms.ReadU16(RegBMSSOC))/10, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn2", float32(bms.ReadU16(RegBMSMaxChargePW))/10, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn3", float32(bms.ReadU16(RegBMSMaxDischargePW))/10, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn4", float32(bms.ReadU16(RegBMSSysStatus)), nowMs)
+	s.setFloat(s.refMeasBms+".AnIn5", float32(bms.ReadU16(RegBMSAlarmStatus)), nowMs)
+	s.setFloat(s.refMeasBms+".AnIn6", float32(bms.ReadU16(RegBMSVoltage))/10, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn7", float32(uint16ToInt16(bms.ReadU16(RegBMSCurrent)))/10, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn8", float32(bms.ReadU16(RegBMSMaxChargeI))/10, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn9", float32(bms.ReadU16(RegBMSMaxDischargeI))/10, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn10", float32(bms.ReadU16(RegBMSCellVMax))/1000, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn11", float32(bms.ReadU16(RegBMSCellVMin))/1000, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn12", float32(bms.ReadU16(RegBMSSOH))/10, nowMs)
 }
 
 // updatePigo 填 PIGO/measGGIO1（GOOSE 遥测 9 值），并返回这组值供 GOOSE 发布复用。
 func (s *iec61850Server) updatePigo(bu *BatteryUnit, nowMs int64) iec61850TelemetryValues {
 	g := s.gooseValues(bu, nowMs)
-	s.setFloat(refPigo+".AnIn1", g.ratedPowerKW, nowMs)
-	s.setFloat(refPigo+".AnIn2", g.socPercent, nowMs)
-	s.setInt(refPigo+".AnIn3", g.pcsStatus, nowMs)
-	s.setFloat(refPigo+".AnIn4", g.activeKW, nowMs)
-	s.setFloat(refPigo+".AnIn5", g.reactiveKVAr, nowMs)
-	s.setFloat(refPigo+".AnIn6", g.maxChargeKW, nowMs)
-	s.setFloat(refPigo+".AnIn7", g.maxDischargeKW, nowMs)
-	s.setFloat(refPigo+".AnIn8", g.activeSetpointKW, nowMs)
-	s.setFloat(refPigo+".AnIn9", g.reactSetpointKVAr, nowMs)
+	s.setFloat(s.refPigo+".AnIn1", g.ratedPowerKW, nowMs)
+	s.setFloat(s.refPigo+".AnIn2", g.socPercent, nowMs)
+	s.setInt(s.refPigo+".AnIn3", g.pcsStatus, nowMs)
+	s.setFloat(s.refPigo+".AnIn4", g.activeKW, nowMs)
+	s.setFloat(s.refPigo+".AnIn5", g.reactiveKVAr, nowMs)
+	s.setFloat(s.refPigo+".AnIn6", g.maxChargeKW, nowMs)
+	s.setFloat(s.refPigo+".AnIn7", g.maxDischargeKW, nowMs)
+	s.setFloat(s.refPigo+".AnIn8", g.activeSetpointKW, nowMs)
+	s.setFloat(s.refPigo+".AnIn9", g.reactSetpointKVAr, nowMs)
 	return g
 }
 
@@ -413,9 +440,9 @@ func (s *iec61850Server) updatePigo(bu *BatteryUnit, nowMs int64) iec61850Teleme
 func (s *iec61850Server) updateSetReadback(bu *BatteryUnit, nowMs int64) {
 	pcs := bu.pcs
 	activeSet := float32(uint16ToInt16(pcs.ReadU16(RegPCSPowerCmd))) / 10
-	s.setMxVal(refCtrlSet+".APCS1", activeSet, nowMs)
-	s.setMxVal(refCtrlSet+".APCS2", s.reactiveSetpointKVAr, nowMs)
-	s.setMxVal(refCtrlSet+".APCS10", float32(pcs.ReadU16(RegPCSGridMode)), nowMs)
+	s.setMxVal(s.refCtrlSet+".APCS1", activeSet, nowMs)
+	s.setMxVal(s.refCtrlSet+".APCS2", s.reactiveSetpointKVAr, nowMs)
+	s.setMxVal(s.refCtrlSet+".APCS10", float32(pcs.ReadU16(RegPCSGridMode)), nowMs)
 }
 
 func (s *iec61850Server) configureGOOSE(cfg IEC61850GOOSEConfig) error {
@@ -442,9 +469,11 @@ func (s *iec61850Server) configureGOOSE(cfg IEC61850GOOSEConfig) error {
 	if err != nil {
 		return fmt.Errorf("create IEC 61850 GOOSE publisher on %s: %w", cfg.InterfaceID, err)
 	}
-	publisher.SetGoCbRef("TEMPLATEPIGO/LLN0$GO$gocb1")
-	publisher.SetGoID("TEMPLATEPIGO/LLN0$GO$gocb1")
-	publisher.SetDataSetRef("TEMPLATEPIGO/LLN0$dsGOOSE1")
+	// GoCBRef / dataset 前缀随 IED 名变化，保证多端点 GOOSE 控制块互不冲突。
+	goCbRef := s.iedName + "PIGO/LLN0$GO$gocb1"
+	publisher.SetGoCbRef(goCbRef)
+	publisher.SetGoID(goCbRef)
+	publisher.SetDataSetRef(s.iedName + "PIGO/LLN0$dsGOOSE1")
 	publisher.SetConfRev(1)
 	publisher.SetTimeAllowedToLive(cfg.TimeAllowedToLiveMS)
 
