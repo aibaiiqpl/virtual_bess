@@ -1,3 +1,4 @@
+- 2026-06-06 [iec61850] IEC 61850 服务端改为按现场 CID(IES1000/IES900 V2.5)全量建模：新增 tools/gen_iec61850_model.py 把 CID 转换为内嵌 iec61850_model.cfg(LD0/CTRL/MEAS/PIGO、带前缀 LN、APC/SPC 控制块)；遥调/遥控改用 Operate 控制回调(APC 写 Oper.ctlVal.f、SPC 写 Oper.ctlVal)，遥测接入 MEAS/PIGO 核心点位，GOOSE dsGOOSE1 顺序对齐 CID。可直接按 CID 配置南向 MMS/GOOSE 点表。
 - 2026-05-22 09:59:20 [] 
 - 2026-05-22 09:59:37 [] 
 - 2026-05-22 09:59:52 [] 

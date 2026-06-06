@@ -14,8 +14,21 @@ import (
 	"github.com/go-bindings/iec61850"
 )
 
+// iec61850_model.cfg 由 tools/gen_iec61850_model.py 从现场 CID
+// (docs/IES1000_IES900_CO_V2.5.cid) 全量转换而来，模型结构与现场逐字段对齐：
+// LD0(公用)/CTRL(控制)/MEAS(测量)/PIGO(GOOSE)，LN 带 set/ctl/meas 等前缀。
+//
 //go:embed iec61850_model.cfg
 var iec61850ModelConfig []byte
+
+// CID 模型中各逻辑节点的对象引用前缀（IED 名 TEMPLATE + LD inst + 带前缀 LN）。
+const (
+	refCtrlSet  = "TEMPLATECTRL/setGGIO1"  // 遥调（APC，setpoint，direct-with-normal-security）
+	refCtrlGapc = "TEMPLATECTRL/ctlGAPC1"  // 遥控（SPC，开关机/复位/待机）
+	refMeasPcs  = "TEMPLATEMEAS/measGGIO1" // PCS 遥测
+	refMeasBms  = "TEMPLATEMEAS/measGGIO2" // BMS 遥测
+	refPigo     = "TEMPLATEPIGO/measGGIO1" // GOOSE 遥测（与 dsGOOSE1 顺序一致）
+)
 
 type iec61850Server struct {
 	sim     *Simulator
@@ -23,20 +36,8 @@ type iec61850Server struct {
 	server  *iec61850.IedServer
 	model   *iec61850.IedModel
 
-	activePowerSetpoint *iec61850.ModelNode
-	reactiveSetpoint    *iec61850.ModelNode
-	pcsCommand          *iec61850.ModelNode
-	pcsRunMode          *iec61850.ModelNode
-
-	ratedPower        *iec61850.ModelNode
-	soc               *iec61850.ModelNode
-	pcsStatus         *iec61850.ModelNode
-	activePower       *iec61850.ModelNode
-	reactivePower     *iec61850.ModelNode
-	maxChargePower    *iec61850.ModelNode
-	maxDischargePower *iec61850.ModelNode
-	activeSetReadback *iec61850.ModelNode
-	reactSetReadback  *iec61850.ModelNode
+	// 对象引用 -> 模型节点缓存，避免每个 Sync tick 重复字符串解析。
+	nodeCache map[string]*iec61850.ModelNode
 
 	goosePublisher       *iec61850.GoosePublisher
 	gooseInterval        time.Duration
@@ -49,6 +50,8 @@ type iec61850MultiServer struct {
 	servers []*iec61850Server
 }
 
+// iec61850TelemetryValues 是 GOOSE dsGOOSE1 / PIGO measGGIO1.AnIn1-9 的 9 个值，
+// 顺序与现场 CID 数据集严格一致，不可随意调整。
 type iec61850TelemetryValues struct {
 	nowMs             int64
 	ratedPowerKW      float32
@@ -60,7 +63,6 @@ type iec61850TelemetryValues struct {
 	maxDischargeKW    float32
 	activeSetpointKW  float32
 	reactSetpointKVAr float32
-	pcsRunMode        float32
 }
 
 func startIEC61850Server(cfg IEC61850Config, sim *Simulator) (IEC61850Service, error) {
@@ -127,7 +129,10 @@ func startIEC61850Device(cfg IEC61850DeviceConfig, sim *Simulator) (*iec61850Ser
 		svc.Close()
 		return nil, err
 	}
-	svc.installWriteHandlers()
+	if err := svc.installControlHandlers(); err != nil {
+		svc.Close()
+		return nil, err
+	}
 	server.Start(port)
 	if !server.IsRunning() {
 		svc.Close()
@@ -176,91 +181,76 @@ func loadIEC61850Model() (*iec61850.IedModel, error) {
 }
 
 func newIEC61850Service(sim *Simulator, battery *BatteryUnit, model *iec61850.IedModel, server *iec61850.IedServer) (*iec61850Server, error) {
-	svc := &iec61850Server{sim: sim, battery: battery, model: model, server: server}
+	return &iec61850Server{
+		sim:       sim,
+		battery:   battery,
+		model:     model,
+		server:    server,
+		nodeCache: make(map[string]*iec61850.ModelNode),
+	}, nil
+}
 
-	required := map[string]**iec61850.ModelNode{
-		"TEMPLATECTRL/GGIO1.APCS1.setMag.f":  &svc.activePowerSetpoint,
-		"TEMPLATECTRL/GGIO1.APCS2.setMag.f":  &svc.reactiveSetpoint,
-		"TEMPLATECTRL/GGIO1.APCS9.setMag.f":  &svc.pcsCommand,
-		"TEMPLATECTRL/GGIO1.APCS10.setMag.f": &svc.pcsRunMode,
-		"TEMPLATEPIGO/GGIO1.AnIn1.mag.f":     &svc.ratedPower,
-		"TEMPLATEPIGO/GGIO1.AnIn2.mag.f":     &svc.soc,
-		"TEMPLATEPIGO/GGIO1.AnIn3.mag.i":     &svc.pcsStatus,
-		"TEMPLATEPIGO/GGIO1.AnIn4.mag.f":     &svc.activePower,
-		"TEMPLATEPIGO/GGIO1.AnIn5.mag.f":     &svc.reactivePower,
-		"TEMPLATEPIGO/GGIO1.AnIn6.mag.f":     &svc.maxChargePower,
-		"TEMPLATEPIGO/GGIO1.AnIn7.mag.f":     &svc.maxDischargePower,
-		"TEMPLATEPIGO/GGIO1.AnIn8.mag.f":     &svc.activeSetReadback,
-		"TEMPLATEPIGO/GGIO1.AnIn9.mag.f":     &svc.reactSetReadback,
+// node 按对象引用解析模型节点并缓存；引用拼写错误（模型里不存在）直接返回 nil。
+func (s *iec61850Server) node(ref string) *iec61850.ModelNode {
+	if n, ok := s.nodeCache[ref]; ok {
+		return n
 	}
-	for ref, target := range required {
-		node := model.GetModelNodeByObjectReference(ref)
-		if node == nil {
-			return nil, fmt.Errorf("IEC 61850 model node %s not found", ref)
+	n := s.model.GetModelNodeByObjectReference(ref)
+	s.nodeCache[ref] = n
+	return n
+}
+
+// installControlHandlers 给可控 DO 注册 Operate 回调。遥调走 APC（ctlVal 为浮点），
+// 遥控走 SPC（ctlVal 为布尔）；二者 ctlModel 均为 direct-with-normal-security。
+func (s *iec61850Server) installControlHandlers() error {
+	bindings := []struct {
+		ref     string
+		handler iec61850.ControlHandler
+	}{
+		{refCtrlSet + ".APCS1", s.ctlActivePower},   // 有功功率设定
+		{refCtrlSet + ".APCS2", s.ctlReactivePower}, // 无功功率设定
+		{refCtrlSet + ".APCS9", s.ctlPCSCommand},    // PCS 控制命令 0关1开2复位3待机
+		{refCtrlSet + ".APCS10", s.ctlRunMode},      // PCS 运行模式 0并网1离网
+		{refCtrlGapc + ".SPCSO2", s.ctlStartStop},   // PCS 开关机
+		{refCtrlGapc + ".SPCSO5", s.ctlFaultReset},  // 故障复位
+		{refCtrlGapc + ".SPCSO6", s.ctlStandby},     // 待机命令
+	}
+	for _, b := range bindings {
+		n := s.node(b.ref)
+		if n == nil {
+			return fmt.Errorf("IEC 61850 control object %s not found in model", b.ref)
 		}
-		*target = node
+		s.server.SetControlHandler(n, b.handler)
 	}
-	return svc, nil
+	return nil
 }
 
-func (s *iec61850Server) installWriteHandlers() {
-	s.server.SetWriteAccessPolicy(iec61850.SP, iec61850.AccessPolicyAllow)
-	s.server.SetHandleWriteAccess(s.activePowerSetpoint, s.handleActivePowerWrite)
-	s.server.SetHandleWriteAccess(s.reactiveSetpoint, s.handleReactivePowerWrite)
-	s.server.SetHandleWriteAccess(s.pcsCommand, s.handlePCSCommandWrite)
-	s.server.SetHandleWriteAccess(s.pcsRunMode, s.handlePCSRunModeWrite)
-}
-
-func (s *iec61850Server) handleActivePowerWrite(_ *iec61850.ModelNode, value *iec61850.MmsValue) iec61850.MmsDataAccessError {
-	if s.applyActivePowerSetpoint(value) {
-		return iec61850.DATA_ACCESS_ERROR_SUCCESS
-	}
-	return iec61850.DATA_ACCESS_ERROR_OBJECT_VALUE_INVALID
-}
-
-func (s *iec61850Server) handleReactivePowerWrite(_ *iec61850.ModelNode, value *iec61850.MmsValue) iec61850.MmsDataAccessError {
-	if s.applyReactivePowerSetpoint(value) {
-		return iec61850.DATA_ACCESS_ERROR_SUCCESS
-	}
-	return iec61850.DATA_ACCESS_ERROR_OBJECT_VALUE_INVALID
-}
-
-func (s *iec61850Server) handlePCSCommandWrite(_ *iec61850.ModelNode, value *iec61850.MmsValue) iec61850.MmsDataAccessError {
-	if s.applyPCSCommand(value) {
-		return iec61850.DATA_ACCESS_ERROR_SUCCESS
-	}
-	return iec61850.DATA_ACCESS_ERROR_OBJECT_VALUE_INVALID
-}
-
-func (s *iec61850Server) handlePCSRunModeWrite(_ *iec61850.ModelNode, value *iec61850.MmsValue) iec61850.MmsDataAccessError {
-	if s.applyPCSRunMode(value) {
-		return iec61850.DATA_ACCESS_ERROR_SUCCESS
-	}
-	return iec61850.DATA_ACCESS_ERROR_OBJECT_VALUE_INVALID
-}
-
-func (s *iec61850Server) applyActivePowerSetpoint(value *iec61850.MmsValue) bool {
-	kw, ok := mmsFloat32(value)
+func (s *iec61850Server) ctlActivePower(_ *iec61850.ModelNode, _ *iec61850.ControlAction, v *iec61850.MmsValue, _ bool) iec61850.ControlHandlerResult {
+	kw, ok := ctlFloat(v)
 	if !ok || !fitsPCSCommandRegister(kw) {
-		return false
+		return iec61850.CONTROL_RESULT_FAILED
 	}
 	raw := int16(math.Round(float64(kw * 10)))
-	return s.writeTargetPCS(RegPCSPowerCmd, uint16(raw)) == nil
-}
-
-func (s *iec61850Server) applyReactivePowerSetpoint(value *iec61850.MmsValue) bool {
-	kvar, ok := mmsFloat32(value)
-	if !ok {
-		return false
+	if s.writeTargetPCS(RegPCSPowerCmd, uint16(raw)) != nil {
+		return iec61850.CONTROL_RESULT_FAILED
 	}
-	s.reactiveSetpointKVAr = kvar
-	return true
+	return iec61850.CONTROL_RESULT_OK
 }
 
-func (s *iec61850Server) applyPCSCommand(value *iec61850.MmsValue) bool {
-	cmd, ok := roundedMMSInt(value)
+func (s *iec61850Server) ctlReactivePower(_ *iec61850.ModelNode, _ *iec61850.ControlAction, v *iec61850.MmsValue, _ bool) iec61850.ControlHandlerResult {
+	kvar, ok := ctlFloat(v)
 	if !ok {
-		return false
+		return iec61850.CONTROL_RESULT_FAILED
+	}
+	// 仿真器寄存器无无功设定项，仅缓存做回读与 GOOSE 上送。
+	s.reactiveSetpointKVAr = kvar
+	return iec61850.CONTROL_RESULT_OK
+}
+
+func (s *iec61850Server) ctlPCSCommand(_ *iec61850.ModelNode, _ *iec61850.ControlAction, v *iec61850.MmsValue, _ bool) iec61850.ControlHandlerResult {
+	cmd, ok := ctlInt(v)
+	if !ok {
+		return iec61850.CONTROL_RESULT_FAILED
 	}
 	var err error
 	switch cmd {
@@ -273,39 +263,74 @@ func (s *iec61850Server) applyPCSCommand(value *iec61850.MmsValue) bool {
 	case 3:
 		err = s.writeTargetPCS(RegPCSPowerCmd, 0)
 	default:
-		return false
+		return iec61850.CONTROL_RESULT_FAILED
 	}
-	return err == nil
+	if err != nil {
+		return iec61850.CONTROL_RESULT_FAILED
+	}
+	return iec61850.CONTROL_RESULT_OK
 }
 
-func (s *iec61850Server) applyPCSRunMode(value *iec61850.MmsValue) bool {
-	mode, ok := roundedMMSInt(value)
+func (s *iec61850Server) ctlRunMode(_ *iec61850.ModelNode, _ *iec61850.ControlAction, v *iec61850.MmsValue, _ bool) iec61850.ControlHandlerResult {
+	mode, ok := ctlInt(v)
+	if !ok || (mode != 0 && mode != 1) {
+		return iec61850.CONTROL_RESULT_FAILED
+	}
+	if s.writeTargetPCS(RegPCSGridMode, uint16(mode)) != nil {
+		return iec61850.CONTROL_RESULT_FAILED
+	}
+	return iec61850.CONTROL_RESULT_OK
+}
+
+func (s *iec61850Server) ctlStartStop(_ *iec61850.ModelNode, _ *iec61850.ControlAction, v *iec61850.MmsValue, _ bool) iec61850.ControlHandlerResult {
+	on, ok := ctlBool(v)
 	if !ok {
-		return false
+		return iec61850.CONTROL_RESULT_FAILED
 	}
-	switch mode {
-	case 0:
-		if err := s.writeTargetPCS(RegPCSGridMode, 0); err != nil {
-			return false
-		}
-	case 1:
-		if err := s.writeTargetPCS(RegPCSGridMode, 1); err != nil {
-			return false
-		}
-	default:
-		return false
+	var reg uint16 = RegPCSShutdown
+	if on {
+		reg = RegPCSStartup
 	}
-	return true
+	if s.writeTargetPCS(reg, 1) != nil {
+		return iec61850.CONTROL_RESULT_FAILED
+	}
+	return iec61850.CONTROL_RESULT_OK
+}
+
+func (s *iec61850Server) ctlFaultReset(_ *iec61850.ModelNode, _ *iec61850.ControlAction, v *iec61850.MmsValue, _ bool) iec61850.ControlHandlerResult {
+	on, ok := ctlBool(v)
+	if !ok || !on {
+		return iec61850.CONTROL_RESULT_FAILED
+	}
+	if s.writeTargetPCS(RegPCSFaultReset, 1) != nil {
+		return iec61850.CONTROL_RESULT_FAILED
+	}
+	return iec61850.CONTROL_RESULT_OK
+}
+
+func (s *iec61850Server) ctlStandby(_ *iec61850.ModelNode, _ *iec61850.ControlAction, v *iec61850.MmsValue, _ bool) iec61850.ControlHandlerResult {
+	on, ok := ctlBool(v)
+	if !ok || !on {
+		return iec61850.CONTROL_RESULT_FAILED
+	}
+	if s.writeTargetPCS(RegPCSPowerCmd, 0) != nil {
+		return iec61850.CONTROL_RESULT_FAILED
+	}
+	return iec61850.CONTROL_RESULT_OK
 }
 
 func (s *iec61850Server) Sync() {
-	values, ok := s.telemetryValues()
-	if !ok {
+	bu := s.targetBattery()
+	if bu == nil {
 		return
 	}
+	nowMs := int64(s.sim.nowFunc().UnixMilli())
 
 	s.server.LockDataModel()
-	s.updateMMS(values)
+	s.updatePcsMeas(bu, nowMs)
+	s.updateBmsMeas(bu, nowMs)
+	values := s.updatePigo(bu, nowMs)
+	s.updateSetReadback(bu, nowMs)
 	s.server.UnlockDataModel()
 
 	if err := s.publishGOOSE(values); err != nil {
@@ -313,46 +338,84 @@ func (s *iec61850Server) Sync() {
 	}
 }
 
-func (s *iec61850Server) telemetryValues() (iec61850TelemetryValues, bool) {
-	bu := s.targetBattery()
-	if bu == nil {
-		return iec61850TelemetryValues{}, false
-	}
+// gooseValues 汇总 dsGOOSE1 / PIGO 的 9 个值；顺序由现场 CID 固定。
+func (s *iec61850Server) gooseValues(bu *BatteryUnit, nowMs int64) iec61850TelemetryValues {
 	pcs := bu.pcs
 	bms := bu.bms
 	return iec61850TelemetryValues{
-		nowMs:             int64(s.sim.nowFunc().UnixMilli()),
+		nowMs:             nowMs,
 		ratedPowerKW:      float32(bu.ratedPowerKW),
 		socPercent:        float32(bms.ReadU16(RegBMSSOC)) / 10,
 		pcsStatus:         int32(iec61850PCSStatus(pcs)),
 		activeKW:          float32(uint16ToInt16(pcs.ReadU16(RegPCSTotalActivePW))) / 10,
-		reactiveKVAr:      0,
+		reactiveKVAr:      float32(uint16ToInt16(pcs.ReadU16(RegPCSTotalReactPW))) / 10,
 		maxChargeKW:       float32(bms.ReadU16(RegBMSMaxChargePW)) / 10,
 		maxDischargeKW:    float32(bms.ReadU16(RegBMSMaxDischargePW)) / 10,
 		activeSetpointKW:  float32(uint16ToInt16(pcs.ReadU16(RegPCSPowerCmd))) / 10,
 		reactSetpointKVAr: s.reactiveSetpointKVAr,
-		pcsRunMode:        float32(pcs.ReadU16(RegPCSGridMode)),
-	}, true
+	}
 }
 
-func (s *iec61850Server) updateMMS(values iec61850TelemetryValues) {
-	s.updateFloat(s.activePowerSetpoint, values.activeSetpointKW, values.nowMs)
-	s.updateFloat(s.reactiveSetpoint, values.reactSetpointKVAr, values.nowMs)
-	s.updateFloat(s.pcsCommand, 0, values.nowMs)
-	s.updateFloat(s.pcsRunMode, values.pcsRunMode, values.nowMs)
+// updatePcsMeas 填 MEAS/measGGIO1（PCS 遥测）核心点位；现场预留/累计电量等点保持默认 0。
+func (s *iec61850Server) updatePcsMeas(bu *BatteryUnit, nowMs int64) {
+	pcs := bu.pcs
+	bms := bu.bms
+	s.setFloat(refMeasPcs+".AnIn1", float32(pcs.ReadU16(RegPCSVoltageA))/10, nowMs)
+	s.setFloat(refMeasPcs+".AnIn2", float32(pcs.ReadU16(RegPCSVoltageB))/10, nowMs)
+	s.setFloat(refMeasPcs+".AnIn3", float32(pcs.ReadU16(RegPCSVoltageC))/10, nowMs)
+	s.setFloat(refMeasPcs+".AnIn4", float32(uint16ToInt16(pcs.ReadU16(RegPCSCurrentA)))/10, nowMs)
+	s.setFloat(refMeasPcs+".AnIn5", float32(uint16ToInt16(pcs.ReadU16(RegPCSCurrentB)))/10, nowMs)
+	s.setFloat(refMeasPcs+".AnIn6", float32(uint16ToInt16(pcs.ReadU16(RegPCSCurrentC)))/10, nowMs)
+	s.setFloat(refMeasPcs+".AnIn7", float32(uint16ToInt16(pcs.ReadU16(RegPCSTotalActivePW)))/10, nowMs)
+	s.setFloat(refMeasPcs+".AnIn8", float32(uint16ToInt16(pcs.ReadU16(RegPCSTotalReactPW)))/10, nowMs)
+	s.setFloat(refMeasPcs+".AnIn9", float32(uint16ToInt16(pcs.ReadU16(RegPCSPowerFactor)))/100, nowMs)
+	s.setFloat(refMeasPcs+".AnIn10", float32(uint16ToInt16(bms.ReadU16(RegBMSPower)))/10, nowMs)
+	s.setFloat(refMeasPcs+".AnIn11", float32(pcs.ReadU16(RegPCSTotalApparent))/10, nowMs)
+	s.setFloat(refMeasPcs+".AnIn12", float32(bms.ReadU16(RegBMSMaxDischargePW))/10, nowMs)
+	s.setFloat(refMeasPcs+".AnIn13", float32(bms.ReadU16(RegBMSMaxChargePW))/10, nowMs)
+	s.setFloat(refMeasPcs+".AnIn14", float32(bms.ReadU16(RegBMSMaxChargePW))/10, nowMs)
+	s.setFloat(refMeasPcs+".AnIn15", float32(bms.ReadU16(RegBMSMaxDischargePW))/10, nowMs)
+}
 
-	s.updateFloat(s.ratedPower, values.ratedPowerKW, values.nowMs)
-	s.updateFloat(s.soc, values.socPercent, values.nowMs)
-	s.server.UpdateInt32AttributeValue(s.pcsStatus, values.pcsStatus)
-	if t := s.pcsStatusTimeNode(); t != nil {
-		s.server.UpdateUTCTimeAttributeValue(t, values.nowMs)
-	}
-	s.updateFloat(s.activePower, values.activeKW, values.nowMs)
-	s.updateFloat(s.reactivePower, values.reactiveKVAr, values.nowMs)
-	s.updateFloat(s.maxChargePower, values.maxChargeKW, values.nowMs)
-	s.updateFloat(s.maxDischargePower, values.maxDischargeKW, values.nowMs)
-	s.updateFloat(s.activeSetReadback, values.activeSetpointKW, values.nowMs)
-	s.updateFloat(s.reactSetReadback, values.reactSetpointKVAr, values.nowMs)
+// updateBmsMeas 填 MEAS/measGGIO2（BMS 遥测）核心点位。
+func (s *iec61850Server) updateBmsMeas(bu *BatteryUnit, nowMs int64) {
+	bms := bu.bms
+	s.setFloat(refMeasBms+".AnIn1", float32(bms.ReadU16(RegBMSSOC))/10, nowMs)
+	s.setFloat(refMeasBms+".AnIn2", float32(bms.ReadU16(RegBMSMaxChargePW))/10, nowMs)
+	s.setFloat(refMeasBms+".AnIn3", float32(bms.ReadU16(RegBMSMaxDischargePW))/10, nowMs)
+	s.setFloat(refMeasBms+".AnIn4", float32(bms.ReadU16(RegBMSSysStatus)), nowMs)
+	s.setFloat(refMeasBms+".AnIn5", float32(bms.ReadU16(RegBMSAlarmStatus)), nowMs)
+	s.setFloat(refMeasBms+".AnIn6", float32(bms.ReadU16(RegBMSVoltage))/10, nowMs)
+	s.setFloat(refMeasBms+".AnIn7", float32(uint16ToInt16(bms.ReadU16(RegBMSCurrent)))/10, nowMs)
+	s.setFloat(refMeasBms+".AnIn8", float32(bms.ReadU16(RegBMSMaxChargeI))/10, nowMs)
+	s.setFloat(refMeasBms+".AnIn9", float32(bms.ReadU16(RegBMSMaxDischargeI))/10, nowMs)
+	s.setFloat(refMeasBms+".AnIn10", float32(bms.ReadU16(RegBMSCellVMax))/1000, nowMs)
+	s.setFloat(refMeasBms+".AnIn11", float32(bms.ReadU16(RegBMSCellVMin))/1000, nowMs)
+	s.setFloat(refMeasBms+".AnIn12", float32(bms.ReadU16(RegBMSSOH))/10, nowMs)
+}
+
+// updatePigo 填 PIGO/measGGIO1（GOOSE 遥测 9 值），并返回这组值供 GOOSE 发布复用。
+func (s *iec61850Server) updatePigo(bu *BatteryUnit, nowMs int64) iec61850TelemetryValues {
+	g := s.gooseValues(bu, nowMs)
+	s.setFloat(refPigo+".AnIn1", g.ratedPowerKW, nowMs)
+	s.setFloat(refPigo+".AnIn2", g.socPercent, nowMs)
+	s.setInt(refPigo+".AnIn3", g.pcsStatus, nowMs)
+	s.setFloat(refPigo+".AnIn4", g.activeKW, nowMs)
+	s.setFloat(refPigo+".AnIn5", g.reactiveKVAr, nowMs)
+	s.setFloat(refPigo+".AnIn6", g.maxChargeKW, nowMs)
+	s.setFloat(refPigo+".AnIn7", g.maxDischargeKW, nowMs)
+	s.setFloat(refPigo+".AnIn8", g.activeSetpointKW, nowMs)
+	s.setFloat(refPigo+".AnIn9", g.reactSetpointKVAr, nowMs)
+	return g
+}
+
+// updateSetReadback 把遥调设定值回填到 setGGIO1 各 APC 的 mxVal（MX 读侧）。
+func (s *iec61850Server) updateSetReadback(bu *BatteryUnit, nowMs int64) {
+	pcs := bu.pcs
+	activeSet := float32(uint16ToInt16(pcs.ReadU16(RegPCSPowerCmd))) / 10
+	s.setMxVal(refCtrlSet+".APCS1", activeSet, nowMs)
+	s.setMxVal(refCtrlSet+".APCS2", s.reactiveSetpointKVAr, nowMs)
+	s.setMxVal(refCtrlSet+".APCS10", float32(pcs.ReadU16(RegPCSGridMode)), nowMs)
 }
 
 func (s *iec61850Server) configureGOOSE(cfg IEC61850GOOSEConfig) error {
@@ -412,6 +475,8 @@ func (s *iec61850Server) publishGOOSE(values iec61850TelemetryValues) error {
 	return nil
 }
 
+// buildIEC61850GooseDataSet 按 dsGOOSE1 的 FCDA 顺序构造 GOOSE 数据集，
+// AnIn3(PCS 状态) 为 Int32，其余为 Float，顺序不可调整。
 func buildIEC61850GooseDataSet(values iec61850TelemetryValues) (*iec61850.LinkedListValue, error) {
 	dataSet := iec61850.NewLinkedListValue()
 	add := func(mmsType iec61850.MmsType, value interface{}) error {
@@ -461,24 +526,34 @@ func (s *iec61850MultiServer) Close() {
 	s.servers = nil
 }
 
-func (s *iec61850Server) updateFloat(node *iec61850.ModelNode, value float32, nowMs int64) {
-	s.server.UpdateFloatAttributeValue(node, value)
-	if t := siblingTimeNode(s.model, node.ObjectReference); t != nil {
+// setFloat 更新某测量 DO 的 mag.f 及其时间戳；DO 缺失时静默跳过（模型已对齐 CID，正常不会发生）。
+func (s *iec61850Server) setFloat(doRef string, value float32, nowMs int64) {
+	if n := s.node(doRef + ".mag.f"); n != nil {
+		s.server.UpdateFloatAttributeValue(n, value)
+	}
+	if t := s.node(doRef + ".t"); t != nil {
 		s.server.UpdateUTCTimeAttributeValue(t, nowMs)
 	}
 }
 
-func (s *iec61850Server) pcsStatusTimeNode() *iec61850.ModelNode {
-	return s.model.GetModelNodeByObjectReference("TEMPLATEPIGO/GGIO1.AnIn3.t")
+// setInt 更新整型测量 DO 的 mag.i 及其时间戳（如 PCS 系统状态）。
+func (s *iec61850Server) setInt(doRef string, value int32, nowMs int64) {
+	if n := s.node(doRef + ".mag.i"); n != nil {
+		s.server.UpdateInt32AttributeValue(n, value)
+	}
+	if t := s.node(doRef + ".t"); t != nil {
+		s.server.UpdateUTCTimeAttributeValue(t, nowMs)
+	}
 }
 
-func siblingTimeNode(model *iec61850.IedModel, ref string) *iec61850.ModelNode {
-	for _, suffix := range []string{".mag.f", ".mag.i"} {
-		if len(ref) > len(suffix) && ref[len(ref)-len(suffix):] == suffix {
-			return model.GetModelNodeByObjectReference(ref[:len(ref)-len(suffix)] + ".t")
-		}
+// setMxVal 更新 APC 控制 DO 的 mxVal.f（设定值回读侧）及时间戳。
+func (s *iec61850Server) setMxVal(doRef string, value float32, nowMs int64) {
+	if n := s.node(doRef + ".mxVal.f"); n != nil {
+		s.server.UpdateFloatAttributeValue(n, value)
 	}
-	return nil
+	if t := s.node(doRef + ".t"); t != nil {
+		s.server.UpdateUTCTimeAttributeValue(t, nowMs)
+	}
 }
 
 func (s *iec61850Server) targetBattery() *BatteryUnit {
@@ -499,24 +574,50 @@ func (s *iec61850Server) writeTargetPCS(register, value uint16) error {
 	return s.sim.writeHolding(bu.pcs.SlaveID, register, value)
 }
 
-func mmsFloat32(value *iec61850.MmsValue) (float32, bool) {
+// ctlFloat 从控制 ctlVal 取浮点：APC 的 ctlVal 是 AnalogueValue 结构体（取首元素 f），
+// 也兼容直接传入 Float/Integer 的情况。
+func ctlFloat(value *iec61850.MmsValue) (float32, bool) {
 	if value == nil {
 		return 0, false
 	}
-	switch v := value.Value.(type) {
-	case float32:
-		return v, true
-	case int64:
-		return float32(v), true
-	case uint32:
-		return float32(v), true
-	default:
-		return 0, false
+	switch value.Type {
+	case iec61850.Float:
+		if v, ok := value.Value.(float32); ok {
+			return v, true
+		}
+	case iec61850.Integer:
+		if v, ok := value.Value.(int64); ok {
+			return float32(v), true
+		}
+	case iec61850.Structure, iec61850.Array:
+		if elems, ok := value.Value.([]*iec61850.MmsValue); ok && len(elems) > 0 {
+			return ctlFloat(elems[0])
+		}
 	}
+	return 0, false
 }
 
-func roundedMMSInt(value *iec61850.MmsValue) (int, bool) {
-	f, ok := mmsFloat32(value)
+// ctlBool 从控制 ctlVal 取布尔：SPC 的 ctlVal 为布尔，兼容结构体包裹的情况。
+func ctlBool(value *iec61850.MmsValue) (bool, bool) {
+	if value == nil {
+		return false, false
+	}
+	switch value.Type {
+	case iec61850.Boolean:
+		if v, ok := value.Value.(bool); ok {
+			return v, true
+		}
+	case iec61850.Structure, iec61850.Array:
+		if elems, ok := value.Value.([]*iec61850.MmsValue); ok && len(elems) > 0 {
+			return ctlBool(elems[0])
+		}
+	}
+	return false, false
+}
+
+// ctlInt 把控制 ctlVal 当作整数命令（要求接近整数，拒绝明显的小数）。
+func ctlInt(value *iec61850.MmsValue) (int, bool) {
+	f, ok := ctlFloat(value)
 	if !ok {
 		return 0, false
 	}

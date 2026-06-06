@@ -125,29 +125,56 @@ iec61850:
 
 ## IEC 61850 点位
 
-当前 IEC 61850 服务端按 `docs/IES1000_IES900_CO_V2.5.cid` 和点位说明接入 PCS/BMS 核心点位。遥调使用 MMS write 写 `SP`，遥测使用 MMS read 读 `MX`。GOOSE 发布使用 CID 中的 `TEMPLATEPIGO/LLN0$GO$gocb1` / `dsGOOSE1`，默认目的 MAC `01-0C-CD-01-01-00`、VLAN priority `4`。
+IEC 61850 模型由 `tools/gen_iec61850_model.py` 从现场 CID `docs/IES1000_IES900_CO_V2.5.cid`
+**全量转换**生成内嵌的 `iec61850_model.cfg`，与现场逐字段对齐：IED 名 `TEMPLATE`，四个逻辑设备
+`LD0`(公用) / `CTRL`(控制) / `MEAS`(测量) / `PIGO`(GOOSE)，逻辑节点带 `set` / `ctl` / `meas` 前缀。
+因此可直接按 CID 配置 emu-rs 南向的 MMS / GOOSE CSV 点表。
+
+CID 模型结构完整（全部 600+ 数据对象都存在、可读写），其中下表的核心点位接入了真实电池仿真；
+现场预留点、故障/告警/遥信位、自检/对时点保持默认值（0 / 正常质量）。
+
+> 重新生成模型：`python3 tools/gen_iec61850_model.py docs/IES1000_IES900_CO_V2.5.cid iec61850_model.cfg`
 
 如果未配置 `iec61850.devices`，IEC 61850 默认只绑定第一套电池单元。配置 `devices` 后，一个进程会为多套 PCS 启动多套 IEC 61850 端点，每个端点通过 `pcs_slave_id` 绑定对应储能单元。这样 Modbus、MMS、GOOSE 共享同一个仿真器，总电表仍能聚合全部 PCS/PV/负载。
 
 MMS 通过不同 TCP 端口区分端点，例如 `:102`、`:1102`。GOOSE 是二层以太网组播，不使用 MMS TCP 端口；多端点需要配置不同 `APPID`，通常也会结合 `goCbRef`、目的 MAC、VLAN 一起区分。启用 GOOSE 时必须配置实际网卡名，通常也需要运行进程具备原始以太网发包权限。
 
-| 对象引用 | FC | 方向 | 含义 |
-|----------|----|------|------|
-| `TEMPLATECTRL/GGIO1.APCS1.setMag.f` | SP | 写 | 有功功率设定，kW，正充负放 |
-| `TEMPLATECTRL/GGIO1.APCS2.setMag.f` | SP | 写 | 无功功率设定，kVar，仅回显 |
-| `TEMPLATECTRL/GGIO1.APCS9.setMag.f` | SP | 写 | PCS 控制命令：0 关机，1 开机，2 复位，3 待机 |
-| `TEMPLATECTRL/GGIO1.APCS10.setMag.f` | SP | 写 | PCS 运行模式：0 并网，1 离网 |
-| `TEMPLATEPIGO/GGIO1.AnIn1.mag.f` | MX | 读 | 额定功率，kW |
-| `TEMPLATEPIGO/GGIO1.AnIn2.mag.f` | MX | 读 | 电池组 SOC，% |
-| `TEMPLATEPIGO/GGIO1.AnIn3.mag.i` | MX | 读 | PCS 系统状态-值模式 |
-| `TEMPLATEPIGO/GGIO1.AnIn4.mag.f` | MX | 读 | 输出总有功功率，kW |
-| `TEMPLATEPIGO/GGIO1.AnIn5.mag.f` | MX | 读 | 输出总无功功率，kVar |
-| `TEMPLATEPIGO/GGIO1.AnIn6.mag.f` | MX | 读 | 电池组最大充电功率，kW |
-| `TEMPLATEPIGO/GGIO1.AnIn7.mag.f` | MX | 读 | 电池组最大放电功率，kW |
-| `TEMPLATEPIGO/GGIO1.AnIn8.mag.f` | MX | 读 | 有功功率设定值，kW |
-| `TEMPLATEPIGO/GGIO1.AnIn9.mag.f` | MX | 读 | 无功功率设定值，kVar |
+### 遥调 / 遥控（控制，已接仿真）
 
-GOOSE `dsGOOSE1` 发布同一组 `TEMPLATEPIGO/GGIO1.AnIn1` - `AnIn9` 遥测值，顺序与上表一致。
+遥调为 APC（`ctlModel=direct-with-normal-security`），客户端用 Operate 写 `Oper.ctlVal.f`（FC `CO`），
+设定值回读在 `mxVal.f`（FC `MX`）；遥控为 SPC，写 `Oper.ctlVal`（布尔）。
+
+| 控制对象 | 类型 | 含义 |
+|----------|------|------|
+| `TEMPLATECTRL/setGGIO1.APCS1` | APC | 有功功率设定，kW，正充负放 |
+| `TEMPLATECTRL/setGGIO1.APCS2` | APC | 无功功率设定，kVar，仅回显 |
+| `TEMPLATECTRL/setGGIO1.APCS9` | APC | PCS 控制命令：0 关机，1 开机，2 复位，3 待机 |
+| `TEMPLATECTRL/setGGIO1.APCS10` | APC | PCS 运行模式：0 并网，1 离网 |
+| `TEMPLATECTRL/ctlGAPC1.SPCSO2` | SPC | PCS 开关机：true 开机，false 关机 |
+| `TEMPLATECTRL/ctlGAPC1.SPCSO5` | SPC | 故障复位：true 复位 |
+| `TEMPLATECTRL/ctlGAPC1.SPCSO6` | SPC | 待机：true 进入待机 |
+
+### 遥测（MX 读，已接仿真）
+
+PCS 遥测在 `TEMPLATEMEAS/measGGIO1.AnInN.mag.f`，BMS 遥测在 `TEMPLATEMEAS/measGGIO2.AnInN.mag.f`，
+GOOSE 9 值在 `TEMPLATEPIGO/measGGIO1.AnIn1`-`AnIn9`（`AnIn3` 为 `mag.i` 整型）。
+
+| 对象引用 | 含义 |
+|----------|------|
+| `TEMPLATEMEAS/measGGIO1.AnIn1`-`AnIn3` | 电网 AB/BC/CA 线电压，V |
+| `TEMPLATEMEAS/measGGIO1.AnIn4`-`AnIn6` | 电网 A/B/C 相电流，A |
+| `TEMPLATEMEAS/measGGIO1.AnIn7` | 输出总有功功率，kW |
+| `TEMPLATEMEAS/measGGIO1.AnIn8` | 输出总无功功率，kVar |
+| `TEMPLATEMEAS/measGGIO1.AnIn9` | 输出功率因数 |
+| `TEMPLATEMEAS/measGGIO1.AnIn10` | 电池功率，kW |
+| `TEMPLATEMEAS/measGGIO1.AnIn12`/`AnIn13` | 当前允许最大放电/充电功率，kW |
+| `TEMPLATEMEAS/measGGIO2.AnIn1` | 电池组 SOC，% |
+| `TEMPLATEMEAS/measGGIO2.AnIn6`/`AnIn7` | 电池组总电压 V / 总电流 A |
+| `TEMPLATEMEAS/measGGIO2.AnIn12` | 电池组 SOH，% |
+
+GOOSE `dsGOOSE1` 发布 `TEMPLATEPIGO/measGGIO1.AnIn1`-`AnIn9`（额定功率、SOC、PCS 状态、有功、无功、
+最大充电、最大放电、有功设定、无功设定），GoCBRef `TEMPLATEPIGO/LLN0$GO$gocb1`，默认目的 MAC
+`01-0C-CD-01-01-00`、VLAN priority `4`，顺序与现场 CID 数据集严格一致。
 
 ## Modbus 点位表
 
