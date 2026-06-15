@@ -3,27 +3,34 @@ modbus:
 
 iec61850:
   enabled: true
+  # 每个端点显式小写 IED 名 pcs0N：emu 端 EMU{N} 的 PCS-IEC61850-MMS.csv 引用
+  # pcs0NCTRL/pcs0NMEAS、共享 GOOSE 点表引用 pcs0NPIGO（对象引用大小写敏感）。
+  # 留空会回退大写 PCS0N，与 emu 点表不匹配，导致遥控 ControlObjectClient_create 失败。
   devices:
     - pcs_slave_id: 1
       address: ":102"
+      ied_name: "pcs01"
       goose:
         enabled: false
         interface: ""
         appid: "0100"
     - pcs_slave_id: 2
       address: ":1102"
+      ied_name: "pcs02"
       goose:
         enabled: false
         interface: ""
         appid: "0101"
     - pcs_slave_id: 3
       address: ":2102"
+      ied_name: "pcs03"
       goose:
         enabled: false
         interface: ""
         appid: "0102"
     - pcs_slave_id: 4
       address: ":3102"
+      ied_name: "pcs04"
       goose:
         enabled: false
         interface: ""

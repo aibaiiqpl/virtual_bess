@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestIEC61850GOOSEConfigDefaultsAndParsesCIDAddress(t *testing.T) {
 	cfg := DefaultConfig()
@@ -132,6 +135,33 @@ func TestIEC61850DevicesRequireUniqueGOOSEAppIDs(t *testing.T) {
 
 	if err := cfg.validate(); err == nil {
 		t.Fatal("validate() error = nil, want duplicate GOOSE APPID error")
+	}
+}
+
+// 回归：交付用多机柜配置必须给每个端点显式小写 IED 名 pcs0N，且通过唯一性校验。
+// emu 点表（pcs0NCTRL/MEAS/PIGO，大小写敏感）依赖这些名字一致；留空回退大写
+// PCS0N 会导致遥控 ControlObjectClient_create 失败。
+func TestGeneratedBESSConfigsUseLowercasePerEndpointIEDNames(t *testing.T) {
+	for _, path := range []string{
+		"configs/bess_4_units_5mwh_2_5mw.yaml",
+		"configs/bess_7_units_5mwh_2_5mw.yaml",
+	} {
+		cfg, err := LoadConfig(path)
+		if err != nil {
+			t.Fatalf("LoadConfig(%q) error = %v", path, err)
+		}
+		seen := map[string]bool{}
+		for i, dev := range cfg.IEC61850.Devices {
+			name := effectiveIEDName(cfg.IEC61850, dev, true)
+			want := fmt.Sprintf("pcs%02d", dev.PCSSlaveID)
+			if name != want {
+				t.Fatalf("%s device[%d] IED name = %q, want %q", path, i, name, want)
+			}
+			if seen[name] {
+				t.Fatalf("%s device[%d] IED name %q duplicated", path, i, name)
+			}
+			seen[name] = true
+		}
 	}
 }
 
