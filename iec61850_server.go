@@ -402,6 +402,10 @@ func (s *iec61850Server) updatePcsMeas(bu *BatteryUnit, nowMs int64) {
 	s.setFloat(s.refMeasPcs+".AnIn13", float32(bms.ReadU16(RegBMSMaxChargePW))/10, nowMs)
 	s.setFloat(s.refMeasPcs+".AnIn14", float32(bms.ReadU16(RegBMSMaxChargePW))/10, nowMs)
 	s.setFloat(s.refMeasPcs+".AnIn15", float32(bms.ReadU16(RegBMSMaxDischargePW))/10, nowMs)
+	// 直流侧（对齐现场 CID）：AnIn41=电池电压，AnIn42=直流电流；
+	// 复用 syncPCSDC 写入的 PCS 直流寄存器，确保 MMS 与 Modbus 两个北向口一致
+	s.setFloat(s.refMeasPcs+".AnIn41", float32(pcs.ReadU16(RegPCSDCVoltage))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn42", float32(uint16ToInt16(pcs.ReadU16(RegPCSDCCurrent)))/10, nowMs)
 }
 
 // updateBmsMeas 填 MEAS/measGGIO2（BMS 遥测）核心点位。
