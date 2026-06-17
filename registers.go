@@ -29,8 +29,8 @@ const (
 	RegPCSShutdown      = 30004 // 1-shutdown
 	RegPCSEStop         = 30005 // 1-emergency stop
 	RegPCSRemoteLocal   = 30006 // 0-local, 1-remote
-	RegPCSPowerCmdAlias = 3010  // S16, 0.1kW, alias of RegPCSPowerCmd
-	RegPCSPowerCmd      = 30010 // S16, 0.1kW, positive=charge, negative=discharge
+	RegPCSPowerCmdAlias = 3010  // S16, 0.1kW, alias of RegPCSPowerCmd（真机约定：负充正放）
+	RegPCSPowerCmd      = 30010 // S16, 0.1kW, negative=charge, positive=discharge（对齐真机 IES1000/IES900）
 )
 
 // PV control registers (writable)

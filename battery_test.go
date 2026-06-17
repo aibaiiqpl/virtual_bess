@@ -12,7 +12,8 @@ func TestPowerCommandAlias3010AppliesLike30010(t *testing.T) {
 	bu.pcs.WriteU16(RegPCSPowerCmdAlias, 500)
 	bu.ProcessPowerCommand()
 
-	assertPowerNear(t, bu.actualPowerKW, 50)
+	// 命令寄存器为真机约定（正=放电），内部 actualPowerKW 取反为 -50（放电）。
+	assertPowerNear(t, bu.actualPowerKW, -50)
 	assertPowerCommandRegisters(t, bu, 500)
 }
 
@@ -37,7 +38,8 @@ func TestPowerCommand30010StillAppliesAndMirrorsAlias(t *testing.T) {
 	bu.pcs.WriteU16(RegPCSPowerCmd, raw)
 	bu.ProcessPowerCommand()
 
-	assertPowerNear(t, bu.actualPowerKW, -50)
+	// 命令寄存器为真机约定（负=充电），内部 actualPowerKW 取反为 +50（充电）。
+	assertPowerNear(t, bu.actualPowerKW, 50)
 	assertPowerCommandRegisters(t, bu, raw)
 }
 

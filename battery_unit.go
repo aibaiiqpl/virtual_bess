@@ -191,7 +191,10 @@ func (bu *BatteryUnit) ProcessPCSControls() {
 func (bu *BatteryUnit) ProcessPowerCommand() {
 	cmdRaw := bu.syncPowerCommandRegisters()
 	if bu.pcsRunning && bu.remoteMode && bu.bmsHVClosed {
-		cmdPowerKW := float64(uint16ToInt16(cmdRaw)) * 0.1
+		// RegPCSPowerCmd 按真机 IES1000/IES900 约定取值：负=充电、正=放电。
+		// 内部 actualPowerKW 用相反的“正充负放”语义驱动电量/电表/状态，
+		// 故此处取反，完成“设备约定 → 内部约定”转换（对齐 emu-go ChargeSign=-1）。
+		cmdPowerKW := -float64(uint16ToInt16(cmdRaw)) * 0.1
 		if cmdPowerKW > bu.ratedPowerKW {
 			cmdPowerKW = bu.ratedPowerKW
 		}
