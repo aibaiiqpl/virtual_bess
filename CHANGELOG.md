@@ -1,3 +1,4 @@
+- 2026-06-21 [iec61850] 新增离散故障告警注入：61850 服务端按当前物理状态置位 PCS IED 的 alarmGGIO1.AlmN.stVal（emu 侧 [fwPoint] 源点），用于端到端验证故障告警链路。映射对齐现场 PCS-IEC61850-MMS.csv：Alm12 直流侧全母线软件欠压←PCS 空载启动(BMS 高压未闭合)、Alm2 储能电池电压过高←SOC≥98%、Alm4 电池电压过高←单体最高电压≥3.55V；故障条件消失或现场复位后自动回 0，由 emu 归档历史。本地 vendored go-bindings/iec61850 副本补上上游缺失的 UpdateBooleanAttributeValue（go.mod replace 到 ./third_party/go-bindings-iec61850）。
 - 2026-06-06 [iec61850] 支持每端点可配 IED 名(ied_name)：决定 MMS 域名与对象引用前缀，可配成 pcs01/pcs02/pcs03 等；多端点未配时按 PCS<slaveID> 自动取唯一名，并校验合法性与唯一性。Modbus 与 IEC 61850 同进程共享同一仿真器同时对外服务，多 BESS 单元与电表聚合逻辑保持不变。
 - 2026-06-06 [iec61850] IEC 61850 服务端改为按现场 CID(IES1000/IES900 V2.5)全量建模：新增 tools/gen_iec61850_model.py 把 CID 转换为内嵌 iec61850_model.cfg(LD0/CTRL/MEAS/PIGO、带前缀 LN、APC/SPC 控制块)；遥调/遥控改用 Operate 控制回调(APC 写 Oper.ctlVal.f、SPC 写 Oper.ctlVal)，遥测接入 MEAS/PIGO 核心点位，GOOSE dsGOOSE1 顺序对齐 CID。可直接按 CID 配置南向 MMS/GOOSE 点表。
 - 2026-05-22 09:59:20 [] 

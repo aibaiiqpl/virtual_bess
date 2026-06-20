@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "../libiec61850"
+		},
+		{
+			"path": "."
+		},
+		{
+			"path": "../../pratexo/iec61850ctl"
+		}
+	],
+	"settings": {
+		"chat.tools.terminal.autoApprove": {
+			"git add": true,
+			"git commit": true,
+			"git push": true
+		}
+	}
+}

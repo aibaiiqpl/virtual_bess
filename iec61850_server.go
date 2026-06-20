@@ -36,6 +36,7 @@ type iec61850Server struct {
 	refMeasPcs  string // PCS 遥测
 	refMeasBms  string // BMS 遥测
 	refPigo     string // GOOSE 遥测（与 dsGOOSE1 顺序一致）
+	refAlarmPcs string // PCS 离散告警（alarmGGIO1.AlmN.stVal，emu fwPoint 来源）
 
 	// 对象引用 -> 模型节点缓存，避免每个 Sync tick 重复字符串解析。
 	nodeCache map[string]*iec61850.ModelNode
@@ -213,6 +214,7 @@ func newIEC61850Service(sim *Simulator, battery *BatteryUnit, model *iec61850.Ie
 		refMeasPcs:  iedName + "MEAS/measGGIO1",
 		refMeasBms:  iedName + "MEAS/measGGIO2",
 		refPigo:     iedName + "PIGO/measGGIO1",
+		refAlarmPcs: iedName + "MEAS/alarmGGIO1",
 		nodeCache:   make(map[string]*iec61850.ModelNode),
 	}, nil
 }
@@ -358,6 +360,7 @@ func (s *iec61850Server) Sync() {
 	s.updateBmsMeas(bu, nowMs)
 	values := s.updatePigo(bu, nowMs)
 	s.updateSetReadback(bu, nowMs)
+	s.updateAlarms(bu, nowMs)
 	s.server.UnlockDataModel()
 
 	if err := s.publishGOOSE(values); err != nil {
@@ -426,6 +429,28 @@ func (s *iec61850Server) updateBmsMeas(bu *BatteryUnit, nowMs int64) {
 	s.setFloat(s.refMeasBms+".AnIn10", float32(bms.ReadU16(RegBMSCellVMax))/1000, nowMs)
 	s.setFloat(s.refMeasBms+".AnIn11", float32(bms.ReadU16(RegBMSCellVMin))/1000, nowMs)
 	s.setFloat(s.refMeasBms+".AnIn12", float32(bms.ReadU16(RegBMSSOH))/10, nowMs)
+}
+
+// 告警触发阈值：满充判定与单体过压判定（贴近 cellVoltageFull=3.6V 曲线）。
+const (
+	alarmSOCHighPercent = 98.0 // SOC ≥ 98% 视为储能电池电压过高（满充）
+	alarmCellVMaxHighMV = 3550 // 单体最高电压 ≥ 3.55V 视为电池电压过高
+)
+
+// updateAlarms 按当前物理状态置位/消除 PCS IED 的离散告警点（alarmGGIO1.AlmN.stVal）。
+//
+// 这些点是 emu 设备级点表 [fwPoint] 的源点，emu 轮询读到 stVal=1 即生成 FwMsg 上报故障，
+// 读到 0 即视为消除并归档到历史。告警纯由当前状态推导（无锁存）：故障条件消失或现场
+// 复位（PCS/BMS FaultReset 已在 ProcessControls 里清除内部标志）后，下一拍 stVal 回 0。
+//
+// 映射对齐 AWS 现场 PCS-IEC61850-MMS.csv：
+//   - Alm12 直流侧全母线软件欠压 ← PCS 空载启动（BMS 高压未闭合）触发的直流欠压故障
+//   - Alm2  储能电池电压过高     ← 满充（SOC 过高）
+//   - Alm4  电池电压过高         ← 单体最高电压过高
+func (s *iec61850Server) updateAlarms(bu *BatteryUnit, nowMs int64) {
+	s.setBool(s.refAlarmPcs+".Alm12", bu.PcsDCUnderVoltFault(), nowMs)
+	s.setBool(s.refAlarmPcs+".Alm2", bu.SOC() >= alarmSOCHighPercent, nowMs)
+	s.setBool(s.refAlarmPcs+".Alm4", bu.bms.ReadU16(RegBMSCellVMax) >= alarmCellVMaxHighMV, nowMs)
 }
 
 // updatePigo 填 PIGO/measGGIO1（GOOSE 遥测 9 值），并返回这组值供 GOOSE 发布复用。
@@ -576,6 +601,17 @@ func (s *iec61850Server) setFloat(doRef string, value float32, nowMs int64) {
 func (s *iec61850Server) setInt(doRef string, value int32, nowMs int64) {
 	if n := s.node(doRef + ".mag.i"); n != nil {
 		s.server.UpdateInt32AttributeValue(n, value)
+	}
+	if t := s.node(doRef + ".t"); t != nil {
+		s.server.UpdateUTCTimeAttributeValue(t, nowMs)
+	}
+}
+
+// setBool 更新某 SPS 告警 DO 的 stVal 及其时间戳；DO 缺失时静默跳过（模型已对齐 CID）。
+// 用于 alarmGGIO1.AlmN.stVal —— emu 侧 [fwPoint] 的源点，置 1 即上报对应故障，置 0 即消除。
+func (s *iec61850Server) setBool(doRef string, value bool, nowMs int64) {
+	if n := s.node(doRef + ".stVal"); n != nil {
+		s.server.UpdateBooleanAttributeValue(n, value)
 	}
 	if t := s.node(doRef + ".t"); t != nil {
 		s.server.UpdateUTCTimeAttributeValue(t, nowMs)

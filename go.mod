@@ -17,3 +17,7 @@ require (
 )
 
 replace aiwatt.net/ems/go-common v1.1.0 => cnb.cool/aiwatt/ems/go-common v1.1.0
+
+// 本地副本补上 UpdateBooleanAttributeValue（上游 v1.0.0 未包装布尔属性更新），
+// 用于在 61850 服务端置位离散告警点 AlmN.stVal。详见 third_party/go-bindings-iec61850/server_bool_patch.go
+replace github.com/go-bindings/iec61850 v1.0.0 => ./third_party/go-bindings-iec61850

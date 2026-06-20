@@ -1,0 +1,806 @@
+name: Build libiec61850 Libraries
+
+# Workflow Behavior:
+# - Push to any branch: Builds libraries but does NOT commit them
+# - Manual trigger: Builds libraries and commits ONLY if 'commit_libraries' is set to true
+# - Artifacts are always uploaded for download regardless of commit setting
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_libraries:
+        description: 'Commit built libraries to repository'
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches:
+      - master
+      - main
+
+env:
+  LIBIEC61850_VERSION: v1.6.1
+  ENABLE_R_GOOSE: 1
+  ENABLE_R_SMV: 1
+  ENABLE_SNTP: 1
+
+jobs:
+  build-linux-amd64:
+    name: Build Linux x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git libmbedtls-dev
+
+      - name: Clone libiec61850
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBIEC61850_VERSION }} \
+            https://github.com/mz-automation/libiec61850.git /tmp/libiec61850
+
+      - name: Enable advanced features
+        run: |
+          cd /tmp/libiec61850
+          sed -i 's/#define CONFIG_IEC61850_R_GOOSE 0/#define CONFIG_IEC61850_R_GOOSE 1/' config/stack_config.h
+          sed -i 's/#define CONFIG_IEC61850_R_SMV 0/#define CONFIG_IEC61850_R_SMV 1/' config/stack_config.h
+          sed -i 's/#define CONFIG_IEC61850_SNTP_CLIENT 0/#define CONFIG_IEC61850_SNTP_CLIENT 1/' config/stack_config.h
+          sed -i 's/#define CONFIG_MMS_SUPPORT_TLS 0/#define CONFIG_MMS_SUPPORT_TLS 1/' config/stack_config.h
+
+      - name: Build library
+        run: |
+          cd /tmp/libiec61850
+          mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+                -DWITH_MBEDTLS=1 \
+                -DCONFIG_EXTERNAL_MBEDTLS_INCLUDE_PATH=/usr/include \
+                -DMBEDTLS_INCLUDE_DIR=/usr/include \
+                -DMBEDTLS_LIBRARY=/usr/lib/x86_64-linux-gnu/libmbedtls.a \
+                -DMBEDX509_LIBRARY=/usr/lib/x86_64-linux-gnu/libmbedx509.a \
+                -DMBEDCRYPTO_LIBRARY=/usr/lib/x86_64-linux-gnu/libmbedcrypto.a \
+                -DBUILD_EXAMPLES=OFF \
+                -DBUILD_PYTHON_BINDINGS=OFF \
+                ..
+          make -j$(nproc)
+
+      - name: Copy library to workspace
+        run: |
+          mkdir -p libiec61850/lib/linux64
+          cp /tmp/libiec61850/build/src/libiec61850.a libiec61850/lib/linux64/
+          cp /tmp/libiec61850/build/hal/libhal.a libiec61850/lib/linux64/
+          cp /usr/lib/x86_64-linux-gnu/libmbedtls.a libiec61850/lib/linux64/
+          cp /usr/lib/x86_64-linux-gnu/libmbedx509.a libiec61850/lib/linux64/
+          cp /usr/lib/x86_64-linux-gnu/libmbedcrypto.a libiec61850/lib/linux64/
+
+      - name: Verify library
+        run: |
+          file libiec61850/lib/linux64/libiec61850.a
+          ls -lh libiec61850/lib/linux64/libiec61850.a
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Debug - Check libraries and symbols
+        run: |
+          echo "=== Library files ==="
+          ls -lh libiec61850/lib/linux64/
+          echo ""
+          echo "=== Check for TLS symbols in libiec61850.a ==="
+          nm libiec61850/lib/linux64/libiec61850.a | grep -i tls || echo "No TLS symbols found!"
+          echo ""
+          echo "=== Check config_linux64.go LDFLAGS ==="
+          grep -A 10 'LDFLAGS' config_linux64.go
+          echo ""
+          echo "=== Environment ==="
+          go env
+
+      - name: Test Go build
+        run: |
+          go build -v ./...
+          echo "Go build successful for linux64!"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libiec61850-linux64
+          path: libiec61850/lib/linux64/*.a
+          retention-days: 30
+
+  build-linux-armv7l:
+    name: Build Linux ARMv7l
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies and cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git
+          sudo apt-get install -y gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf
+
+      - name: Install mbedtls for ARM
+        run: |
+          # Build mbedtls 2.28 for ARM (compatible with libiec61850 v1.6.1)
+          git clone --depth 1 --branch v2.28.8 https://github.com/Mbed-TLS/mbedtls.git /tmp/mbedtls
+          cd /tmp/mbedtls
+          mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_C_COMPILER=arm-linux-gnueabihf-gcc \
+                -DCMAKE_CXX_COMPILER=arm-linux-gnueabihf-g++ \
+                -DENABLE_PROGRAMS=OFF \
+                -DENABLE_TESTING=OFF \
+                ..
+          make -j$(nproc)
+          sudo make install
+
+      - name: Clone libiec61850
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBIEC61850_VERSION }} \
+            https://github.com/mz-automation/libiec61850.git /tmp/libiec61850
+
+      - name: Enable advanced features
+        run: |
+          cd /tmp/libiec61850
+          sed -i 's/#define CONFIG_IEC61850_R_GOOSE 0/#define CONFIG_IEC61850_R_GOOSE 1/' config/stack_config.h
+          sed -i 's/#define CONFIG_IEC61850_R_SMV 0/#define CONFIG_IEC61850_R_SMV 1/' config/stack_config.h
+          sed -i 's/#define CONFIG_IEC61850_SNTP_CLIENT 0/#define CONFIG_IEC61850_SNTP_CLIENT 1/' config/stack_config.h
+          sed -i 's/#define CONFIG_MMS_SUPPORT_TLS 0/#define CONFIG_MMS_SUPPORT_TLS 1/' config/stack_config.h
+
+      - name: Create toolchain file
+        run: |
+          cat > /tmp/armv7l-toolchain.cmake << 'EOF'
+          set(CMAKE_SYSTEM_NAME Linux)
+          set(CMAKE_SYSTEM_PROCESSOR arm)
+          set(CMAKE_C_COMPILER arm-linux-gnueabihf-gcc)
+          set(CMAKE_CXX_COMPILER arm-linux-gnueabihf-g++)
+          set(CMAKE_FIND_ROOT_PATH /usr/arm-linux-gnueabihf)
+          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+          EOF
+
+      - name: Build library
+        run: |
+          cd /tmp/libiec61850
+          mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+                -DWITH_MBEDTLS=1 \
+                -DCONFIG_EXTERNAL_MBEDTLS_INCLUDE_PATH=/tmp/mbedtls/include \
+                -DCMAKE_TOOLCHAIN_FILE=/tmp/armv7l-toolchain.cmake \
+                -DMBEDTLS_INCLUDE_DIR=/tmp/mbedtls/include \
+                -DMBEDTLS_LIBRARY=/tmp/mbedtls/build/library/libmbedtls.a \
+                -DMBEDX509_LIBRARY=/tmp/mbedtls/build/library/libmbedx509.a \
+                -DMBEDCRYPTO_LIBRARY=/tmp/mbedtls/build/library/libmbedcrypto.a \
+                -DBUILD_EXAMPLES=OFF \
+                -DBUILD_PYTHON_BINDINGS=OFF \
+                ..
+          make -j$(nproc)
+
+      - name: Copy library to workspace
+        run: |
+          mkdir -p libiec61850/lib/linux_armv7l
+          cp /tmp/libiec61850/build/src/libiec61850.a libiec61850/lib/linux_armv7l/
+          cp /tmp/libiec61850/build/hal/libhal.a libiec61850/lib/linux_armv7l/
+          cp /tmp/mbedtls/build/library/libmbedtls.a libiec61850/lib/linux_armv7l/
+          cp /tmp/mbedtls/build/library/libmbedx509.a libiec61850/lib/linux_armv7l/
+          cp /tmp/mbedtls/build/library/libmbedcrypto.a libiec61850/lib/linux_armv7l/
+
+      - name: Verify library
+        run: |
+          file libiec61850/lib/linux_armv7l/libiec61850.a
+          ls -lh libiec61850/lib/linux_armv7l/libiec61850.a
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Debug - Check libraries and symbols
+        run: |
+          echo "=== Library files ==="
+          ls -lh libiec61850/lib/linux_armv7l/
+          echo ""
+          echo "=== Check for TLS symbols in libiec61850.a ==="
+          nm libiec61850/lib/linux_armv7l/libiec61850.a | grep -i tls || echo "No TLS symbols found!"
+          echo ""
+          echo "=== Check config_armv7l.go LDFLAGS ==="
+          grep -A 10 'LDFLAGS' config_armv7l.go
+          echo ""
+          echo "=== CMake cache for TLS/MBEDTLS ==="
+          grep -i 'mbedtls\|tls' /tmp/libiec61850/build/CMakeCache.txt || echo "No mbedtls entries in CMakeCache"
+
+      - name: Test Go build (cross-compile)
+        env:
+          GOOS: linux
+          GOARCH: arm
+          GOARM: 7
+          CC: arm-linux-gnueabihf-gcc
+          CGO_ENABLED: 1
+        run: |
+          go build -v ./...
+          echo "Go build successful for linux_armv7l!"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libiec61850-linux-armv7l
+          path: libiec61850/lib/linux_armv7l/*.a
+          retention-days: 30
+
+  build-linux-armv8:
+    name: Build Linux ARMv8 (ARM64)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git libmbedtls-dev
+
+      - name: Clone libiec61850
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBIEC61850_VERSION }} \
+            https://github.com/mz-automation/libiec61850.git /tmp/libiec61850
+
+      - name: Enable advanced features
+        run: |
+          cd /tmp/libiec61850
+          sed -i 's/#define CONFIG_IEC61850_R_GOOSE 0/#define CONFIG_IEC61850_R_GOOSE 1/' config/stack_config.h
+          sed -i 's/#define CONFIG_IEC61850_R_SMV 0/#define CONFIG_IEC61850_R_SMV 1/' config/stack_config.h
+          sed -i 's/#define CONFIG_IEC61850_SNTP_CLIENT 0/#define CONFIG_IEC61850_SNTP_CLIENT 1/' config/stack_config.h
+          sed -i 's/#define CONFIG_MMS_SUPPORT_TLS 0/#define CONFIG_MMS_SUPPORT_TLS 1/' config/stack_config.h
+
+      - name: Build library
+        run: |
+          cd /tmp/libiec61850
+          mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+                -DWITH_MBEDTLS=1 \
+                -DCONFIG_EXTERNAL_MBEDTLS_INCLUDE_PATH=/usr/include \
+                -DMBEDTLS_INCLUDE_DIR=/usr/include \
+                -DMBEDTLS_LIBRARY=/usr/lib/aarch64-linux-gnu/libmbedtls.a \
+                -DMBEDX509_LIBRARY=/usr/lib/aarch64-linux-gnu/libmbedx509.a \
+                -DMBEDCRYPTO_LIBRARY=/usr/lib/aarch64-linux-gnu/libmbedcrypto.a \
+                -DBUILD_EXAMPLES=OFF \
+                -DBUILD_PYTHON_BINDINGS=OFF \
+                ..
+          make -j$(nproc)
+
+      - name: Copy library to workspace
+        run: |
+          mkdir -p libiec61850/lib/linux_armv8
+          cp /tmp/libiec61850/build/src/libiec61850.a libiec61850/lib/linux_armv8/
+          cp /tmp/libiec61850/build/hal/libhal.a libiec61850/lib/linux_armv8/
+          cp /usr/lib/aarch64-linux-gnu/libmbedtls.a libiec61850/lib/linux_armv8/
+          cp /usr/lib/aarch64-linux-gnu/libmbedx509.a libiec61850/lib/linux_armv8/
+          cp /usr/lib/aarch64-linux-gnu/libmbedcrypto.a libiec61850/lib/linux_armv8/
+
+      - name: Verify library
+        run: |
+          file libiec61850/lib/linux_armv8/libiec61850.a
+          ls -lh libiec61850/lib/linux_armv8/libiec61850.a
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Debug - Check libraries and symbols
+        run: |
+          echo "=== Library files ==="
+          ls -lh libiec61850/lib/linux_armv8/
+          echo ""
+          echo "=== Check for TLS symbols in libiec61850.a ==="
+          nm libiec61850/lib/linux_armv8/libiec61850.a | grep -i tls || echo "No TLS symbols found!"
+          echo ""
+          echo "=== Check config_armv8.go LDFLAGS ==="
+          grep -A 10 'LDFLAGS' config_armv8.go
+          echo ""
+          echo "=== CMake cache for TLS/MBEDTLS ==="
+          grep -i 'mbedtls\|tls' /tmp/libiec61850/build/CMakeCache.txt || echo "No mbedtls entries in CMakeCache"
+
+      - name: Test Go build
+        run: |
+          go build -v ./...
+          echo "Go build successful for linux_armv8!"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libiec61850-linux-armv8
+          path: libiec61850/lib/linux_armv8/*.a
+          retention-days: 30
+
+  build-macos-arm64:
+    name: Build macOS ARM64
+    runs-on: macos-15  # M1 runner
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install cmake
+
+      - name: Install mbedtls 2.28 from source
+        run: |
+          # Build mbedtls 2.28 for macOS (compatible with libiec61850 v1.6.1)
+          git clone --depth 1 --branch v2.28.8 https://github.com/Mbed-TLS/mbedtls.git /tmp/mbedtls
+          cd /tmp/mbedtls
+          mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+                -DCMAKE_OSX_ARCHITECTURES=arm64 \
+                -DENABLE_PROGRAMS=OFF \
+                -DENABLE_TESTING=OFF \
+                ..
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Clone libiec61850
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBIEC61850_VERSION }} \
+            https://github.com/mz-automation/libiec61850.git /tmp/libiec61850
+
+      - name: Enable advanced features
+        run: |
+          cd /tmp/libiec61850
+          sed -i '' 's/#define CONFIG_IEC61850_R_GOOSE 0/#define CONFIG_IEC61850_R_GOOSE 1/' config/stack_config.h
+          sed -i '' 's/#define CONFIG_IEC61850_R_SMV 0/#define CONFIG_IEC61850_R_SMV 1/' config/stack_config.h
+          sed -i '' 's/#define CONFIG_IEC61850_SNTP_CLIENT 0/#define CONFIG_IEC61850_SNTP_CLIENT 1/' config/stack_config.h
+          sed -i '' 's/#define CONFIG_MMS_SUPPORT_TLS 0/#define CONFIG_MMS_SUPPORT_TLS 1/' config/stack_config.h
+
+      - name: Debug - Verify mbedtls libraries
+        run: |
+          echo "=== mbedtls libraries ==="
+          ls -lh /tmp/mbedtls/build/library/
+          echo ""
+          echo "=== Checking for symbols in libmbedtls.a ==="
+          nm /tmp/mbedtls/build/library/libmbedtls.a | grep -i "mbedtls_ssl_config_init" || echo "Symbol not found!"
+
+      - name: Build library
+        run: |
+          cd /tmp/libiec61850
+          mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+                -DWITH_MBEDTLS=1 \
+                -DCONFIG_EXTERNAL_MBEDTLS_INCLUDE_PATH=/tmp/mbedtls/include \
+                -DCMAKE_OSX_ARCHITECTURES=arm64 \
+                -DMBEDTLS_INCLUDE_DIR=/tmp/mbedtls/include \
+                -DMBEDTLS_LIBRARY=/tmp/mbedtls/build/library/libmbedtls.a \
+                -DMBEDX509_LIBRARY=/tmp/mbedtls/build/library/libmbedx509.a \
+                -DMBEDCRYPTO_LIBRARY=/tmp/mbedtls/build/library/libmbedcrypto.a \
+                -DBUILD_EXAMPLES=OFF \
+                -DBUILD_PYTHON_BINDINGS=OFF \
+                ..
+          # Build only static libraries (hal and iec61850 targets)
+          make -j$(sysctl -n hw.ncpu) hal iec61850
+
+      - name: Copy library to workspace
+        run: |
+          mkdir -p libiec61850/lib/darwin_armv8
+          cp /tmp/libiec61850/build/src/libiec61850.a libiec61850/lib/darwin_armv8/
+          cp /tmp/libiec61850/build/hal/libhal.a libiec61850/lib/darwin_armv8/
+          cp /tmp/mbedtls/build/library/libmbedtls.a libiec61850/lib/darwin_armv8/
+          cp /tmp/mbedtls/build/library/libmbedx509.a libiec61850/lib/darwin_armv8/
+          cp /tmp/mbedtls/build/library/libmbedcrypto.a libiec61850/lib/darwin_armv8/
+
+      - name: Verify library
+        run: |
+          file libiec61850/lib/darwin_armv8/libiec61850.a
+          ls -lh libiec61850/lib/darwin_armv8/libiec61850.a
+          lipo -info libiec61850/lib/darwin_armv8/libiec61850.a
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Debug - Check libraries and symbols
+        run: |
+          echo "=== Library files ==="
+          ls -lh libiec61850/lib/darwin_armv8/
+          echo ""
+          echo "=== Check for TLS symbols in libiec61850.a ==="
+          nm libiec61850/lib/darwin_armv8/libiec61850.a | grep -i tls || echo "No TLS symbols found!"
+          echo ""
+          echo "=== Check config_darwinarmv8.go LDFLAGS ==="
+          grep -A 10 'LDFLAGS' config_darwinarmv8.go
+          echo ""
+          echo "=== CMake cache for TLS/MBEDTLS ==="
+          grep -i 'mbedtls\|tls' /tmp/libiec61850/build/CMakeCache.txt || echo "No mbedtls entries in CMakeCache"
+
+      - name: Test Go build
+        run: |
+          go build -v ./...
+          echo "Go build successful for darwin_armv8!"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libiec61850-darwin-arm64
+          path: libiec61850/lib/darwin_armv8/*.a
+          retention-days: 30
+
+  build-macos-amd64:
+    name: Build macOS x64
+    runs-on: macos-15-intel  # Intel runner
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install cmake
+
+      - name: Install mbedtls 2.28 from source
+        run: |
+          # Build mbedtls 2.28 for macOS (compatible with libiec61850 v1.6.1)
+          git clone --depth 1 --branch v2.28.8 https://github.com/Mbed-TLS/mbedtls.git /tmp/mbedtls
+          cd /tmp/mbedtls
+          mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+                -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+                -DENABLE_PROGRAMS=OFF \
+                -DENABLE_TESTING=OFF \
+                ..
+          make -j$(sysctl -n hw.ncpu)
+
+      - name: Clone libiec61850
+        run: |
+          git clone --depth 1 --branch ${{ env.LIBIEC61850_VERSION }} \
+            https://github.com/mz-automation/libiec61850.git /tmp/libiec61850
+
+      - name: Enable advanced features
+        run: |
+          cd /tmp/libiec61850
+          sed -i '' 's/#define CONFIG_IEC61850_R_GOOSE 0/#define CONFIG_IEC61850_R_GOOSE 1/' config/stack_config.h
+          sed -i '' 's/#define CONFIG_IEC61850_R_SMV 0/#define CONFIG_IEC61850_R_SMV 1/' config/stack_config.h
+          sed -i '' 's/#define CONFIG_IEC61850_SNTP_CLIENT 0/#define CONFIG_IEC61850_SNTP_CLIENT 1/' config/stack_config.h
+          sed -i '' 's/#define CONFIG_MMS_SUPPORT_TLS 0/#define CONFIG_MMS_SUPPORT_TLS 1/' config/stack_config.h
+
+      - name: Debug - Verify mbedtls libraries
+        run: |
+          echo "=== mbedtls libraries ==="
+          ls -lh /tmp/mbedtls/build/library/
+          echo ""
+          echo "=== Checking for symbols in libmbedtls.a ==="
+          nm /tmp/mbedtls/build/library/libmbedtls.a | grep -i "mbedtls_ssl_config_init" || echo "Symbol not found!"
+
+      - name: Build library
+        run: |
+          cd /tmp/libiec61850
+          mkdir build && cd build
+          cmake -DCMAKE_BUILD_TYPE=Release \
+                -DWITH_MBEDTLS=1 \
+                -DCONFIG_EXTERNAL_MBEDTLS_INCLUDE_PATH=/tmp/mbedtls/include \
+                -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+                -DMBEDTLS_INCLUDE_DIR=/tmp/mbedtls/include \
+                -DMBEDTLS_LIBRARY=/tmp/mbedtls/build/library/libmbedtls.a \
+                -DMBEDX509_LIBRARY=/tmp/mbedtls/build/library/libmbedx509.a \
+                -DMBEDCRYPTO_LIBRARY=/tmp/mbedtls/build/library/libmbedcrypto.a \
+                -DBUILD_EXAMPLES=OFF \
+                -DBUILD_PYTHON_BINDINGS=OFF \
+                ..
+          # Build only static libraries (hal and iec61850 targets)
+          make -j$(sysctl -n hw.ncpu) hal iec61850
+
+      - name: Copy library to workspace
+        run: |
+          mkdir -p libiec61850/lib/darwin_amd64
+          cp /tmp/libiec61850/build/src/libiec61850.a libiec61850/lib/darwin_amd64/
+          cp /tmp/libiec61850/build/hal/libhal.a libiec61850/lib/darwin_amd64/
+          cp /tmp/mbedtls/build/library/libmbedtls.a libiec61850/lib/darwin_amd64/
+          cp /tmp/mbedtls/build/library/libmbedx509.a libiec61850/lib/darwin_amd64/
+          cp /tmp/mbedtls/build/library/libmbedcrypto.a libiec61850/lib/darwin_amd64/
+
+      - name: Verify library
+        run: |
+          file libiec61850/lib/darwin_amd64/libiec61850.a
+          ls -lh libiec61850/lib/darwin_amd64/libiec61850.a
+          lipo -info libiec61850/lib/darwin_amd64/libiec61850.a
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Debug - Check libraries and symbols
+        run: |
+          echo "=== Library files ==="
+          ls -lh libiec61850/lib/darwin_amd64/
+          echo ""
+          echo "=== Check for TLS symbols in libiec61850.a ==="
+          nm libiec61850/lib/darwin_amd64/libiec61850.a | grep -i tls || echo "No TLS symbols found!"
+          echo ""
+          echo "=== Check config_darwin_amd64.go LDFLAGS ==="
+          grep -A 10 'LDFLAGS' config_darwin_amd64.go || echo "config_darwin_amd64.go not found - will use fallback config"
+          echo ""
+          echo "=== CMake cache for TLS/MBEDTLS ==="
+          grep -i 'mbedtls\|tls' /tmp/libiec61850/build/CMakeCache.txt || echo "No mbedtls entries in CMakeCache"
+
+      - name: Test Go build
+        run: |
+          go build -v ./...
+          echo "Go build successful for darwin_amd64!"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libiec61850-darwin-x64
+          path: libiec61850/lib/darwin_amd64/*.a
+          retention-days: 30
+
+  build-windows-amd64:
+    name: Build Windows x64 (MinGW)
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MinGW (MSYS2)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-make
+            mingw-w64-x86_64-binutils
+
+      - name: Setup PATH
+        shell: pwsh
+        run: |
+          $mingw = "C:\mingw64\bin"
+          echo "$mingw" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Build MbedTLS
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch v2.28.8 https://github.com/Mbed-TLS/mbedtls.git C:\mbedtls
+          cmake `
+            -S C:\mbedtls `
+            -B C:\mbedtls\build `
+            -G "MinGW Makefiles" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DENABLE_PROGRAMS=OFF `
+            -DENABLE_TESTING=OFF
+          cmake --build C:\mbedtls\build
+
+      - name: Clone libiec61850
+        shell: pwsh
+        run: |
+          git clone --depth 1 --branch $env:LIBIEC61850_VERSION https://github.com/mz-automation/libiec61850.git C:\libiec61850
+
+      - name: Install WinPcap developer pack (WpdPack) for L2 GOOSE/SMV
+        shell: pwsh
+        run: |
+          $wpzip = "C:\WpdPack_4_1_2.zip"
+          $url = "https://www.winpcap.org/install/bin/WpdPack_4_1_2.zip"
+          Invoke-WebRequest -Uri $url -OutFile $wpzip -UseBasicParsing
+          Expand-Archive -Path $wpzip -DestinationPath "C:\wpd_extract" -Force
+          $wpd = Get-ChildItem "C:\wpd_extract" -Directory | Select-Object -First 1
+          if (-not $wpd) { $wpd = New-Item -ItemType Directory -Path "C:\wpd_extract\WpdPack"; Get-Item "C:\wpd_extract\WpdPack" }
+          $wpdPath = $wpd.FullName
+          $dest = "C:\libiec61850\third_party\winpcap"
+          New-Item -ItemType Directory -Path $dest -Force
+          Copy-Item -Path "$wpdPath\Include" -Destination "$dest\Include" -Recurse -Force -ErrorAction Stop
+          New-Item -ItemType Directory -Path "$dest\Lib" -Force
+          if (Test-Path "$wpdPath\Lib\x64") {
+            Copy-Item -Path "$wpdPath\Lib\x64\*" -Destination "$dest\Lib" -Force
+          } else {
+            Copy-Item -Path "$wpdPath\Lib\*" -Destination "$dest\Lib" -Force
+          }
+          if (-not (Test-Path "$dest\Lib\wpcap.lib")) { throw "wpcap.lib not found under $dest\Lib" }
+          Write-Host "WinPcap developer pack installed; L2 GOOSE/SMV will be enabled."
+
+      - name: Build libiec61850
+        shell: pwsh
+        run: |
+          cmake `
+            -S C:\libiec61850 `
+            -B C:\libiec61850\build `
+            -G "MinGW Makefiles" `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCONFIG_IEC61850_L2_GOOSE=1 `
+            -DCONFIG_IEC61850_L2_SMV=1 `
+            -DCONFIG_IEC61850_R_GOOSE=1 `
+            -DCONFIG_IEC61850_R_SMV=1 `
+            -DCONFIG_IEC61850_SNTP_CLIENT=1 `
+            -DWITH_MBEDTLS=1 `
+            -DMBEDTLS_INCLUDE_DIR=C:\mbedtls\include `
+            -DMBEDTLS_LIBRARY=C:\mbedtls\build\library\libmbedtls.a `
+            -DMBEDX509_LIBRARY=C:\mbedtls\build\library\libmbedx509.a `
+            -DMBEDCRYPTO_LIBRARY=C:\mbedtls\build\library\libmbedcrypto.a `
+            -DBUILD_EXAMPLES=OFF
+          cmake --build C:\libiec61850\build --target iec61850
+          cmake --build C:\libiec61850\build --target hal
+
+      - name: Copy libraries
+        shell: pwsh
+        run: |
+          mkdir libiec61850\lib\win64 -Force
+          copy C:\libiec61850\build\src\libiec61850.a libiec61850\lib\win64\
+          copy C:\libiec61850\build\hal\libhal.a libiec61850\lib\win64\
+          copy C:\mbedtls\build\library\libmbedtls.a libiec61850\lib\win64\
+          copy C:\mbedtls\build\library\libmbedx509.a libiec61850\lib\win64\
+          copy C:\mbedtls\build\library\libmbedcrypto.a libiec61850\lib\win64\
+          copy C:\libiec61850\third_party\winpcap\Lib\wpcap.lib libiec61850\lib\win64\
+          copy C:\libiec61850\third_party\winpcap\Lib\packet.lib libiec61850\lib\win64\
+          dir libiec61850\lib\win64
+
+      - name: Verify GOOSE/SV objects in library
+        shell: pwsh
+        run: |
+          $env:Path = "C:\mingw64\bin;" + $env:Path
+          $arList = ar t libiec61850\lib\win64\libiec61850.a 2>&1 | Out-String
+          if ($arList -notmatch "goose_publisher") { Write-Error "goose_publisher object not found in libiec61850.a" }
+          if ($arList -notmatch "sv_publisher") { Write-Error "sv_publisher object not found in libiec61850.a" }
+          Write-Host "GOOSE/SV object files present in libiec61850.a"
+
+      - name: Verify REQUIRED symbols exist (this is what matters)
+        shell: pwsh
+        run: |
+          $env:Path = "C:\mingw64\bin;" + $env:Path
+          $lib = "libiec61850\lib\win64\libiec61850.a"
+          $nmOut = nm -g $lib 2>&1
+          $nm = $nmOut | Out-String
+          # Grep for mms/goose (case insensitive) to inspect what symbols are in the archive
+          $nmOut | Select-String -Pattern "(?i)mms|goose" -AllMatches | ForEach-Object { Write-Host $_.Line }
+          # With WpdPack installed, L2 GOOSE/SMV are enabled. Require full publisher symbols.
+          if ($nm -notmatch "GoosePublisher_createEx" -and $nm -notmatch "_GoosePublisher_createEx") { throw "Missing symbol GoosePublisher_createEx in $lib (L2 GOOSE not compiled in)" }
+          if ($nm -notmatch "SVPublisher_create" -and $nm -notmatch "_SVPublisher_create")          { throw "Missing symbol SVPublisher_create in $lib (L2 SMV not compiled in)" }
+          Write-Host "OK: L2 publisher symbols present."
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Test Go build
+        shell: pwsh
+        env:
+          CGO_ENABLED: 1
+          CC: x86_64-w64-mingw32-gcc
+          CXX: x86_64-w64-mingw32-g++
+          CGO_LDFLAGS_ALLOW: ^-Wl,--(whole|no-whole)-archive$
+        run: |
+          where gcc
+          go env CC CXX
+          go build -x -v ./...
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libiec61850-windows-x64
+          path: libiec61850/lib/win64/*.a
+          retention-days: 30
+
+  verify-and-commit:
+    name: Verify Build and Optionally Commit
+    needs: [build-linux-amd64, build-linux-armv7l, build-linux-armv8, build-macos-arm64, build-macos-amd64, build-windows-amd64]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check commit mode
+        run: |
+          if [ "${{ github.event.inputs.commit_libraries }}" == "true" ]; then
+            echo "::notice::Libraries WILL be committed to repository"
+            echo "WILL_COMMIT=true" >> $GITHUB_ENV
+          else
+            echo "::notice::Libraries will NOT be committed (build and verify only)"
+            echo "WILL_COMMIT=false" >> $GITHUB_ENV
+          fi
+          echo "Triggered by: ${{ github.event_name }}"
+          echo "Branch/Ref: ${{ github.ref }}"
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Copy libraries to correct locations
+        run: |
+          mkdir -p libiec61850/lib/linux64
+          mkdir -p libiec61850/lib/linux_armv7l
+          mkdir -p libiec61850/lib/linux_armv8
+          mkdir -p libiec61850/lib/darwin_armv8
+          mkdir -p libiec61850/lib/darwin_amd64
+          mkdir -p libiec61850/lib/win64
+          
+          cp artifacts/libiec61850-linux64/*.a libiec61850/lib/linux64/
+          cp artifacts/libiec61850-linux-armv7l/*.a libiec61850/lib/linux_armv7l/
+          cp artifacts/libiec61850-linux-armv8/*.a libiec61850/lib/linux_armv8/
+          cp artifacts/libiec61850-darwin-arm64/*.a libiec61850/lib/darwin_armv8/
+          cp artifacts/libiec61850-darwin-x64/*.a libiec61850/lib/darwin_amd64/
+          cp artifacts/libiec61850-windows-x64/*.a libiec61850/lib/win64/
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+
+      - name: Verify build on Linux
+        run: |
+          go build ./...
+          echo "Build successful!"
+
+      - name: List all libraries
+        run: |
+          echo "Built libraries:"
+          ls -lh libiec61850/lib/*/libiec61850.a
+
+      - name: Configure Git
+        if: env.WILL_COMMIT == 'true'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+
+      - name: Commit libraries
+        if: env.WILL_COMMIT == 'true'
+        run: |
+          git add libiec61850/lib/*/*.a
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Build: Update libiec61850 v1.6.1 libraries for all platforms" \
+                       -m "" \
+                       -m "Built with:" \
+                       -m "- R-GOOSE enabled" \
+                       -m "- R-SMV enabled" \
+                       -m "- SNTP client enabled" \
+                       -m "" \
+                       -m "Platforms:" \
+                       -m "- Linux x86_64" \
+                       -m "- Linux ARMv7l" \
+                       -m "- Linux ARMv8 (ARM64)" \
+                       -m "- macOS ARM64" \
+                       -m "- macOS x64" \
+                       -m "- Windows x64" \
+                       -m "" \
+                       -m "Auto-built by GitHub Actions"
+            git push
+          fi
+
+      - name: Create artifact summary
+        run: |
+          echo "# Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Show commit status
+          if [ "${{ env.WILL_COMMIT }}" == "true" ]; then
+            echo "## ✅ Libraries Committed to Repository" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## 📦 Libraries Built (Not Committed)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> **Note:** Libraries were built and verified but not committed to the repository." >> $GITHUB_STEP_SUMMARY
+            echo "> To commit libraries, manually trigger this workflow with 'Commit built libraries' enabled." >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          echo "## Built Libraries" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Size | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Linux x86_64 | $(du -h libiec61850/lib/linux64/libiec61850.a | cut -f1) | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Linux ARMv7l | $(du -h libiec61850/lib/linux_armv7l/libiec61850.a | cut -f1) | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Linux ARMv8 | $(du -h libiec61850/lib/linux_armv8/libiec61850.a | cut -f1) | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| macOS ARM64 | $(du -h libiec61850/lib/darwin_armv8/libiec61850.a | cut -f1) | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| macOS x64 | $(du -h libiec61850/lib/darwin_amd64/libiec61850.a | cut -f1) | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Windows x64 | $(du -h libiec61850/lib/win64/libiec61850.a | cut -f1) | ✅ |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## Configuration" >> $GITHUB_STEP_SUMMARY
+          echo "- libiec61850: v1.6.1" >> $GITHUB_STEP_SUMMARY
+          echo "- R-GOOSE: ✅ Enabled" >> $GITHUB_STEP_SUMMARY
+          echo "- R-SMV: ✅ Enabled" >> $GITHUB_STEP_SUMMARY
+          echo "- SNTP Client: ✅ Enabled" >> $GITHUB_STEP_SUMMARY

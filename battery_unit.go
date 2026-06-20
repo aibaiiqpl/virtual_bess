@@ -53,10 +53,10 @@ func NewBatteryUnit(cfg BatteryUnitConfig, pcsACVoltage float64, pcs, bms *Slave
 		pcsACVoltage:       pcsACVoltage,
 		clusterCount:       cfg.ClusterCount,
 		currentEnergyKWh:   cfg.RatedCapacityKWh * cfg.InitialSOC / 100.0,
-		remoteMode:        true,
-		gridTied:          true,
-		bmsHVClosed:       true,
-		pcsRunning:        true,
+		remoteMode:         true,
+		gridTied:           true,
+		bmsHVClosed:        true,
+		pcsRunning:         true,
 	}
 
 	// 默认控制寄存器值
@@ -71,6 +71,9 @@ func NewBatteryUnit(cfg BatteryUnitConfig, pcsACVoltage float64, pcs, bms *Slave
 }
 
 func (bu *BatteryUnit) ActualPowerKW() float64 { return bu.actualPowerKW }
+
+// PcsDCUnderVoltFault 暴露 PCS 直流侧欠压故障标志，供 61850 服务端置位告警点。
+func (bu *BatteryUnit) PcsDCUnderVoltFault() bool { return bu.pcsDCUnderVoltFault }
 
 // SOC 返回当前电量百分比 (0-100)。
 func (bu *BatteryUnit) SOC() float64 {
