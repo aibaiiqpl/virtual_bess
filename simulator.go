@@ -26,11 +26,13 @@ type Simulator struct {
 	banks         map[uint8]*SlaveBank
 	writeHandlers map[uint8]func(addr, value uint16)
 
-	batteries []*BatteryUnit
-	pvs       []*PVUnit
-	meters    []*meterAgg
-	loads     []*Load
-	weather   *Weather
+	batteries  []*BatteryUnit
+	pvs        []*PVUnit
+	meters     []*meterAgg
+	loads      []*Load
+	fires      []*Fire
+	temphumids []*TempHumid
+	weather    *Weather
 
 	gridVoltage float64
 
@@ -133,6 +135,18 @@ func NewSimulator(cfg *Config, server *mbserver.Server) *Simulator {
 		sim.meters = append(sim.meters, agg)
 	}
 
+	// 创建消防 / 温湿度辅控虚拟设备（各占独立 slaveId，只读 holding，无写回调）。
+	if cfg.Fire != nil {
+		bank := NewSlaveBank(cfg.Fire.SlaveID, false)
+		sim.banks[cfg.Fire.SlaveID] = bank
+		sim.fires = append(sim.fires, NewFire(*cfg.Fire, bank))
+	}
+	for _, thCfg := range cfg.TemperatureHumid {
+		bank := NewSlaveBank(thCfg.SlaveID, false)
+		sim.banks[thCfg.SlaveID] = bank
+		sim.temphumids = append(sim.temphumids, NewTempHumid(thCfg, bank))
+	}
+
 	// 初始化：跑一次 weather/load/PV/meter 同步，让寄存器有初值。
 	sim.weather.Update(0)
 	for _, ld := range sim.loads {
@@ -173,6 +187,10 @@ func (sim *Simulator) Tick() {
 		pv.UpdateSimulation(now, dt, weatherCoeff)
 	}
 
+	for _, th := range sim.temphumids {
+		th.Update(dt)
+	}
+
 	sim.updateMeters(dt)
 	sim.syncAll()
 }
@@ -207,6 +225,12 @@ func (sim *Simulator) syncAll() {
 	}
 	for _, agg := range sim.meters {
 		agg.meter.Sync()
+	}
+	for _, f := range sim.fires {
+		f.Sync()
+	}
+	for _, th := range sim.temphumids {
+		th.Sync()
 	}
 }
 

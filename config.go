@@ -65,6 +65,24 @@ type LoadCfg struct {
 	RatedPowerKW float64 `yaml:"rated_power_kw"`
 }
 
+// FireConfig 消防遥信虚拟设备：4 个遥信值（0=正常 / 非0=告警·故障），
+// 源寄存器布局对齐 emu 设备级点表 fire.csv（源地址 0/1/2/3 → 北向 22000-22003）。
+type FireConfig struct {
+	SlaveID    uint8  `yaml:"slave_id"`
+	FireSystem uint16 `yaml:"fire_system"` // 源 0 → 北向 22000：0-正常 / 1-故障
+	Smoke      uint16 `yaml:"smoke"`       // 源 1 → 北向 22001：0-正常 / 1-有烟感告警
+	Gas        uint16 `yaml:"gas"`         // 源 2 → 北向 22002：0-正常 / 1-有可燃气体告警
+	FireDevice uint16 `yaml:"fire_device"` // 源 3 → 北向 22003：0-正常(无动作) / 1-火警(被启动)
+}
+
+// THConfig 温湿度虚拟设备：温度/湿度基准值（℃ / %），仿真叠加缓慢正弦波动。
+// 源寄存器 0=温度 / 1=湿度，S16 ×0.1，对齐 emu 设备级点表 th.csv（北向 27000+）。
+type THConfig struct {
+	SlaveID     uint8   `yaml:"slave_id"`
+	Temperature float64 `yaml:"temperature"`
+	Humidity    float64 `yaml:"humidity"`
+}
+
 type ModbusConfig struct {
 	Address string `yaml:"address"`
 }
@@ -116,8 +134,12 @@ type Config struct {
 	PVUnits      []PVUnitConfig      `yaml:"pv_units"`
 	Meters       []MeterConfig       `yaml:"meters"`
 	Loads        []LoadCfg           `yaml:"loads"`
-	Log          LogConfig           `yaml:"log"`
-	State        StateConfig         `yaml:"state"`
+	// Fire 消防遥信虚拟设备（可选，nil = 不模拟）。
+	Fire *FireConfig `yaml:"fire"`
+	// TemperatureHumid 温湿度虚拟设备列表（可多台，对齐现场多温湿度仪）。
+	TemperatureHumid []THConfig  `yaml:"temperature_humidity"`
+	Log              LogConfig   `yaml:"log"`
+	State            StateConfig `yaml:"state"`
 	// Timezone 用于 PV 日照曲线计算，IANA 时区名（如 "Europe/Lisbon"）；空则使用系统本地时区。
 	Timezone string `yaml:"timezone"`
 }
@@ -293,6 +315,17 @@ func (c *Config) validate() error {
 			if !loadNames[n] {
 				return fmt.Errorf("%s references unknown load name %q", label, n)
 			}
+		}
+	}
+	// 消防 / 温湿度 slaveId 同样纳入全局唯一性校验，避免与 PCS/BMS/PV/电表撞号。
+	if c.Fire != nil {
+		if err := check(c.Fire.SlaveID, "fire"); err != nil {
+			return err
+		}
+	}
+	for i, th := range c.TemperatureHumid {
+		if err := check(th.SlaveID, fmt.Sprintf("temperature_humidity[%d]", i)); err != nil {
+			return err
 		}
 	}
 	return nil
