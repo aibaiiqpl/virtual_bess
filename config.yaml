@@ -4,10 +4,10 @@ modbus:
 iec61850:
   enabled: false
   address: ":102"
-  ied_name: ""                     # IED 名（MMS 域名/对象引用前缀）；空且单端点时回退 TEMPLATE
+  ied_name: ""
   goose:
     enabled: false
-    interface: ""                  # e.g. "eth0"; required when goose.enabled=true
+    interface: ""
     appid: "0100"
     dst_mac: "01-0C-CD-01-01-00"
     vlan_priority: 4
@@ -18,38 +18,26 @@ iec61850:
   devices:
     - pcs_slave_id: 1
       address: ":102"
-      ied_name: "pcs01"            # 每个端点独立 IED 名；不填则多端点自动取 PCS<slaveID>（PCS01…）
-      goose:
-        enabled: false
-        interface: ""
-        appid: "0100"
-        dst_mac: "01-0C-CD-01-01-00"
-        vlan_priority: 4
-        vlan_id: 0
-        disable_vlan: false
-        interval_ms: 1000
-        time_allowed_to_live_ms: 5000
+      ied_name: "pcs01"
     - pcs_slave_id: 2
       address: ":1102"
       ied_name: "pcs02"
-      goose:
-        enabled: false
-        interface: ""
-        appid: "0101"
-        dst_mac: "01-0C-CD-01-01-00"
-        vlan_priority: 4
-        vlan_id: 0
-        disable_vlan: false
-        interval_ms: 1000
-        time_allowed_to_live_ms: 5000
 
+# 日本大阪场景：60Hz 电网。
 grid:
-  voltage: 10000               # 电表所在侧的相电压 V（PCC 点）
+  # 关口表所在侧"相电压" V。现场关口电压等级 6.6kV 为线电压，
+  # 仿真寄存器统一写相电压：6600 / √3 ≈ 3810.5 V。
+  voltage: 3810.5
+  frequency: 60                # 大阪属日本西部，标称频率 60Hz
 
 pcs:
-  ac_voltage: 720              # PCS / PV 逆变器 AC 出口相电压 V（升压变低压侧）
+  # PCS AC 出口"相电压" V。现场 PCS 电压等级 500V 为线电压，
+  # 仿真寄存器统一写相电压：500 / √3 ≈ 288.7 V。
+  ac_voltage: 288.7
 
-# 电池单元：仅 1# 分区，一主一从，共 2 套。
+# 两套储能柜：每柜 1 PCS + 1 BMS（10 簇并联），无光伏。
+# battery_voltage_full=1382 → 串数 round(1382/3.6)=384，单体≈3.3V 时 pack≈1267V，
+# 对齐现场 BMS（单体 3.3V / 总电压 1268V）。每簇并联，簇电压≈pack 电压。
 battery_units:
   - pcs_slave_id: 1
     bms_slave_id: 11
@@ -57,124 +45,50 @@ battery_units:
     rated_power_kw: 2500
     initial_soc: 30.0
     soh: 100.0
-    battery_voltage_full: 1400
-    cluster_count: 12
+    battery_voltage_full: 1382
+    cluster_count: 10
   - pcs_slave_id: 2
     bms_slave_id: 12
     rated_capacity_kwh: 5016
     rated_power_kw: 2500
     initial_soc: 30.0
     soh: 100.0
-    battery_voltage_full: 1400
-    cluster_count: 12
+    battery_voltage_full: 1382
+    cluster_count: 10
 
-# 光伏逆变器，10 台：21,22 挂 zone1 关口表下；23-26 挂 PV 表 1；27-30 挂 PV 表 2
-pv_units:
-  - slave_id: 21
-    rated_power_kw: 150
-  - slave_id: 22
-    rated_power_kw: 150
-  - slave_id: 23
-    rated_power_kw: 150
-  - slave_id: 24
-    rated_power_kw: 150
-  - slave_id: 25
-    rated_power_kw: 150
-  - slave_id: 26
-    rated_power_kw: 150
-  - slave_id: 27
-    rated_power_kw: 150
-  - slave_id: 28
-    rated_power_kw: 150
-  - slave_id: 29
-    rated_power_kw: 150
-  - slave_id: 30
-    rated_power_kw: 150
+# 无光伏：必须显式置空。LoadConfig 以 DefaultConfig 为基底再 yaml.Unmarshal，
+# 缺省 pv_units 键时不会清空默认值（默认含 1 台 PV slave 21），故须显式 []。
+pv_units: []
 
-# 2 路负载，分别挂在两块 400V 负载表下，每路最大 2000kW
+# 站用/辅助负荷：辅助电表后挂的小负载（空调、热管理、控制电源等），约十几千瓦。
 loads:
-  - name: load_a
-    rated_power_kw: 2000
-  - name: load_b
-    rated_power_kw: 2000
+  - name: aux
+    rated_power_kw: 16
 
-# 电表：1 主关口 (15kV) + 1 zone1 关口 (800V) + 2 PV 计量 (800V) + 2 负载 (400V) + 1 储能计量 (800V)
-#
-# 仿真输出约定（全部统一写二次侧，EMS 端 × PT × CT 还原）：
-#   - 电压：写 V_一次 / PT （U16, 0.1V）
-#   - 电流：写 I_一次 / CT （S32, 0.1A；CT=1 时即一次值）
-#   - 功率/电度：写 P_一次 / (PT × CT) （S32）
-#
-# EMS 侧还原：
-#   实际电压 = 寄存器值 × 0.1V × PT
-#   实际电流 = 寄存器值 × 0.1A × CT
-#   实际有功 = 寄存器值 × 0.001kW × PT × CT
-#   实际电度 = 寄存器值 × 0.01kWh × PT × CT
-#
-# | Slave | 表             | 聚合                              | 一次电压 | EMS PT | EMS CT |
-# |-------|----------------|-----------------------------------|----------|--------|--------|
-# | 31    | main (15kV)    | 全部 PCS / PV / 负载              | 15000V   | 150    | 1      |
-# | 32    | zone1 (800V)   | PCS1,2 + PV21,22 （无负载）       | 800V     | 1      | 1      |
-# | 34    | pv1 (800V)     | PV23,24,25,26 （发电=forward）    | 800V     | 1      | 1      |
-# | 38    | pv2 (800V)     | PV27,28,29,30 （发电=forward）    | 800V     | 1      | 1      |
-# | 35    | load1 (400V)   | load_a （≤ 2000kW）               | 400V     | 1      | 1      |
-# | 39    | load2 (400V)   | load_b （≤ 2000kW）               | 400V     | 1      | 1      |
-# | 36    | pcs1_2 (800V)  | PCS1+PCS2 充放电                  | 800V     | 1      | 1      |
+# 电表：
+#   - 31 main：6.6kV 关口表（PCC），is_main 聚合全部 PCS + 站用辅助负荷。
+#   - 32 aux ：500V 辅助/站用电表，本质是负载电表，计量站用辅助负荷 aux。
+# 电压统一写相电压（线电压 / √3），pt_ratio=1 时寄存器即一次相电压（0.1V）。
 meters:
   - slave_id: 31
     name: main
-    is_main: true             # 主关口表，自动聚合全部 PCS / PV / 负载
-    voltage: 15000            # 15kV 系统线电压
-    pt_ratio: 150             # EMS 端配 PT=150, CT=1
+    is_main: true             # 关口表，聚合全部 PCS + 负荷
+    voltage: 3810.5           # 6.6kV 线电压 → 相电压 3810.5V
+    pt_ratio: 1
   - slave_id: 32
-    name: zone1               # zone1 关口表（储能 + 屋顶 PV，无负载）
-    pcs_slave_ids: [1, 2]
-    pv_slave_ids: [21, 22]
-    voltage: 800              # 800V 低压侧
-    pt_ratio: 1               # EMS 端配 PT=1, CT=1
-  - slave_id: 33
-    name: pv_zone1            # zone1 屋顶 PV 计量表（PV21,22；发电 = forward）
-    pv_slave_ids: [21, 22]
-    flow_direction: outflow
-    voltage: 800
-    pt_ratio: 1               # EMS 端配 PT=1, CT=1
-  - slave_id: 34
-    name: pv1                 # PV 计量表 1（发电 = forward）
-    pv_slave_ids: [23, 24, 25, 26]
-    flow_direction: outflow
-    voltage: 800
-    pt_ratio: 1               # EMS 端配 PT=1, CT=1
-  - slave_id: 38
-    name: pv2                 # PV 计量表 2（发电 = forward）
-    pv_slave_ids: [27, 28, 29, 30]
-    flow_direction: outflow
-    voltage: 800
-    pt_ratio: 1               # EMS 端配 PT=1, CT=1
-  - slave_id: 35
-    name: load1               # 负载电表 1（400V，≤ 2000kW）
-    load_names: [load_a]
-    voltage: 400
-    pt_ratio: 1               # EMS 端配 PT=1, CT=1
-  - slave_id: 39
-    name: load2               # 负载电表 2（400V，≤ 2000kW）
-    load_names: [load_b]
-    voltage: 400
-    pt_ratio: 1               # EMS 端配 PT=1, CT=1
-  - slave_id: 36
-    name: pcs1_2              # 储能计量表（PCS1+PCS2 充放电）
-    pcs_slave_ids: [1, 2]
-    voltage: 800
-    pt_ratio: 1               # EMS 端配 PT=1, CT=1
+    name: aux                 # 辅助/站用电表（≈ 负载电表，计量站用辅助负荷）
+    load_names: [aux]
+    voltage: 288.7            # 500V 线电压 → 相电压 288.7V
+    pt_ratio: 1
 
 log:
   file: "logs/virtual_bess.log"
   level: "info"
   console: true
 
-# 持久化：电表 forward/reverse 电度、电池 SOC/总充总放、PV 总/日/月/年发电量。
-# 进程退出（SIGTERM/SIGINT）和每 interval 秒各刷一次。
+# 持久化：电表 forward/reverse 电度、电池 SOC/总充总放。
 state:
   file: "state.json"
   interval: 15
 
-timezone: "Europe/Lisbon"
+timezone: "Asia/Tokyo"

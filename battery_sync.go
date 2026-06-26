@@ -167,7 +167,7 @@ func (bu *BatteryUnit) syncPCSGrid(powerKW float64) {
 		}
 	}
 
-	bu.pcs.WriteU16(RegPCSFrequency, 5000)
+	bu.pcs.WriteU16(RegPCSFrequency, uint16(gridFrequencyHz*100))
 }
 
 func (bu *BatteryUnit) syncPCSDC(powerKW, batVoltage float64) {

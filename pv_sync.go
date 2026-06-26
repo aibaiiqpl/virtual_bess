@@ -41,7 +41,7 @@ func (pv *PVUnit) Sync() {
 		}
 	}
 
-	pv.bank.WriteU16(RegPVGridFrequency, 5000)
+	pv.bank.WriteU16(RegPVGridFrequency, uint16(gridFrequencyHz*100))
 	pv.bank.WriteU16(RegPVPowerFactor, int16ToUint16(1000))
 	pv.bank.WriteU16(RegPVACActivePower, int16ToUint16(int16(powerKW*10)))
 	pv.bank.WriteU16(RegPVACReactivePower, 0)

@@ -156,7 +156,7 @@ func (m *Meter) Sync() {
 	m.bank.WriteS32(RegMeterPFBHi, pf1000)
 	m.bank.WriteS32(RegMeterPFCHi, pf1000)
 
-	// 频率 50 ± 0.05 Hz
-	freqHz := 50.0 + (rand.Float64()*2-1)*0.05
+	// 频率围绕电网标称频率 ±0.05 Hz 抖动（50Hz 或日本等 60Hz 区域）
+	freqHz := gridFrequencyHz + (rand.Float64()*2-1)*0.05
 	m.bank.WriteU16(RegMeterFrequency, uint16(freqHz*100))
 }

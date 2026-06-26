@@ -27,6 +27,7 @@ func main() {
 	}
 
 	SetPVTimezone(cfg.Timezone)
+	SetGridFrequency(cfg.Grid.Frequency)
 
 	if cfg.Log.File != "" {
 		zaplog.InitZapLogger(cfg.Log.Console, cfg.Log.File, cfg.Log.Level)
