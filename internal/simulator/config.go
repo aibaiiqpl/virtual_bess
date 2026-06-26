@@ -13,6 +13,9 @@ import (
 
 type GridConfig struct {
 	Voltage float64 `yaml:"voltage"`
+	// Frequency 电网标称频率 Hz：50（默认，中国/欧洲）或 60（日本东部、北美等 60Hz 区域）。
+	// 统一供电表 / PCS / PV 同步点写频率寄存器，避免在多处硬编码。
+	Frequency float64 `yaml:"frequency"`
 }
 
 type PCSConfig struct {
@@ -202,6 +205,9 @@ func LoadConfig(path string) (*Config, error) {
 func (c *Config) applyDefaults() {
 	if c.Grid.Voltage == 0 {
 		c.Grid.Voltage = 220
+	}
+	if c.Grid.Frequency == 0 {
+		c.Grid.Frequency = defaultGridFrequencyHz
 	}
 	if c.Modbus.Address == "" {
 		c.Modbus.Address = ":502"
