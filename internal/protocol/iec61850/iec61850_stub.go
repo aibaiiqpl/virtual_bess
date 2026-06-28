@@ -1,10 +1,14 @@
 //go:build !iec61850
 
-package simulator
+package iec61850sim
 
-import "fmt"
+import (
+	"fmt"
 
-func StartIEC61850Server(cfg IEC61850Config, sim *Simulator) (IEC61850Service, error) {
+	"virtual_bess/internal/simulator"
+)
+
+func StartServer(cfg simulator.IEC61850Config, sim *simulator.Simulator) (IEC61850Service, error) {
 	_ = sim
 	if !cfg.Enabled {
 		return noopIEC61850Service{}, nil

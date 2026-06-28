@@ -1,4 +1,4 @@
-package simulator
+package iec61850sim
 
 type IEC61850Service interface {
 	Sync()

@@ -413,6 +413,10 @@ func effectiveIEDName(cfg IEC61850Config, device IEC61850DeviceConfig, multi boo
 	}
 }
 
+func EffectiveIEDName(cfg IEC61850Config, device IEC61850DeviceConfig, multi bool) string {
+	return effectiveIEDName(cfg, device, multi)
+}
+
 // isValidIEDName 限制 IED 名为合法 MMS 标识符：首字符为字母，其余为字母/数字/下划线，长度 ≤ 32。
 // MMS 域名是 IEDName 拼上 LD inst（如 CTRL/MEAS），过长或非法字符会让 libiec61850 拒绝建模。
 func isValidIEDName(name string) bool {
@@ -485,6 +489,10 @@ func parseIEC61850AppID(value string) (uint16, error) {
 	return uint16(appID), nil
 }
 
+func ParseIEC61850AppID(value string) (uint16, error) {
+	return parseIEC61850AppID(value)
+}
+
 func parseIEC61850MAC(value string) ([6]uint8, error) {
 	var mac [6]uint8
 	text := strings.ReplaceAll(strings.ReplaceAll(strings.TrimSpace(value), "-", ""), ":", "")
@@ -503,6 +511,10 @@ func parseIEC61850MAC(value string) ([6]uint8, error) {
 	return mac, nil
 }
 
+func ParseIEC61850MAC(value string) ([6]uint8, error) {
+	return parseIEC61850MAC(value)
+}
+
 func splitIEC61850Address(address string) (string, int, error) {
 	host, portText, err := net.SplitHostPort(address)
 	if err != nil {
@@ -513,4 +525,8 @@ func splitIEC61850Address(address string) (string, int, error) {
 		return "", 0, fmt.Errorf("invalid IEC 61850 port %q", portText)
 	}
 	return host, port, nil
+}
+
+func SplitIEC61850Address(address string) (string, int, error) {
+	return splitIEC61850Address(address)
 }

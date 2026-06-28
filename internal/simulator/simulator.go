@@ -160,6 +160,33 @@ func NewSimulator(cfg *Config, server *mbserver.Server) *Simulator {
 	return sim
 }
 
+// Now 返回仿真器当前时间源，供协议适配层统一取时。
+func (sim *Simulator) Now() time.Time {
+	return sim.nowFunc()
+}
+
+// BatteryUnits 返回当前配置中的电池单元列表副本。
+func (sim *Simulator) BatteryUnits() []*BatteryUnit {
+	out := make([]*BatteryUnit, len(sim.batteries))
+	copy(out, sim.batteries)
+	return out
+}
+
+// BatteryUnitByPCSSlaveID 按 PCS slaveId 查找电池单元。
+func (sim *Simulator) BatteryUnitByPCSSlaveID(pcsSlaveID uint8) (*BatteryUnit, bool) {
+	for _, battery := range sim.batteries {
+		if battery.PCSSlaveID() == pcsSlaveID {
+			return battery, true
+		}
+	}
+	return nil, false
+}
+
+// WriteHolding 写入指定 slave 的 holding 寄存器，并触发对应写回调。
+func (sim *Simulator) WriteHolding(slaveID uint8, register, value uint16) error {
+	return sim.writeHolding(slaveID, register, value)
+}
+
 // Tick 推进一秒仿真。
 func (sim *Simulator) Tick() {
 	sim.mu.Lock()

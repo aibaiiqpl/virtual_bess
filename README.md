@@ -1,7 +1,7 @@
 # Virtual BESS
 
-虚拟储能系统模拟器，通过 Modbus TCP 对外暴露 PCS / BMS / PV / 电表寄存器，用于开发调试。
-单端口、按 **slaveId** 路由，支持同时模拟多套 PCS+BMS 和多台 PV 逆变器。
+虚拟储能系统模拟器，通过 Modbus TCP 和 IEC 61850 MMS / GOOSE 对外暴露 PCS / BMS / PV / 电表等虚拟设备，用于 EMS 开发调试和自动化回归测试。
+Modbus TCP 单端口、按 **slaveId** 路由；IEC 61850 支持按多端点 IED 名暴露多套 PCS/BMS 仿真。
 
 ## 项目背景
 

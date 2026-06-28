@@ -72,6 +72,14 @@ func NewBatteryUnit(cfg BatteryUnitConfig, pcsACVoltage float64, pcs, bms *Slave
 
 func (bu *BatteryUnit) ActualPowerKW() float64 { return bu.actualPowerKW }
 
+func (bu *BatteryUnit) PCSSlaveID() uint8 { return bu.pcs.SlaveID }
+
+func (bu *BatteryUnit) RatedPowerKW() float64 { return bu.ratedPowerKW }
+
+func (bu *BatteryUnit) PCSBank() *SlaveBank { return bu.pcs }
+
+func (bu *BatteryUnit) BMSBank() *SlaveBank { return bu.bms }
+
 // PcsDCUnderVoltFault 暴露 PCS 直流侧欠压故障标志，供 61850 服务端置位告警点。
 func (bu *BatteryUnit) PcsDCUnderVoltFault() bool { return bu.pcsDCUnderVoltFault }
 

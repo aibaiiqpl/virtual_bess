@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"virtual_bess/internal/mbserver"
+	iec61850sim "virtual_bess/internal/protocol/iec61850"
 	"virtual_bess/internal/simulator"
 	"virtual_bess/internal/zaplog"
 )
@@ -47,7 +48,7 @@ func main() {
 	zaplog.Infof("modbus TCP server listening on %s", cfg.Modbus.Address)
 
 	sim := simulator.NewSimulator(cfg, server)
-	iec61850Service, err := simulator.StartIEC61850Server(cfg.IEC61850, sim)
+	iec61850Service, err := iec61850sim.StartServer(cfg.IEC61850, sim)
 	if err != nil {
 		zaplog.Errorf("failed to start IEC 61850 server: %v", err)
 		server.Close()

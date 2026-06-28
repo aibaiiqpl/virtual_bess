@@ -1,6 +1,6 @@
 //go:build iec61850
 
-package simulator
+package iec61850sim
 
 import (
 	"bytes"
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-bindings/iec61850"
+	"virtual_bess/internal/simulator"
 	"virtual_bess/internal/zaplog"
 )
 
@@ -23,8 +24,8 @@ import (
 var iec61850ModelConfig []byte
 
 type iec61850Server struct {
-	sim     *Simulator
-	battery *BatteryUnit
+	sim     *simulator.Simulator
+	battery *simulator.BatteryUnit
 	server  *iec61850.IedServer
 	model   *iec61850.IedModel
 
@@ -67,7 +68,7 @@ type iec61850TelemetryValues struct {
 	reactSetpointKVAr float32
 }
 
-func StartIEC61850Server(cfg IEC61850Config, sim *Simulator) (IEC61850Service, error) {
+func StartServer(cfg simulator.IEC61850Config, sim *simulator.Simulator) (IEC61850Service, error) {
 	if !cfg.Enabled {
 		return noopIEC61850Service{}, nil
 	}
@@ -84,32 +85,35 @@ func StartIEC61850Server(cfg IEC61850Config, sim *Simulator) (IEC61850Service, e
 	return multi, nil
 }
 
-func effectiveIEC61850Devices(cfg IEC61850Config, sim *Simulator) []IEC61850DeviceConfig {
+func effectiveIEC61850Devices(cfg simulator.IEC61850Config, sim *simulator.Simulator) []simulator.IEC61850DeviceConfig {
 	if len(cfg.Devices) > 0 {
-		devices := make([]IEC61850DeviceConfig, len(cfg.Devices))
+		devices := make([]simulator.IEC61850DeviceConfig, len(cfg.Devices))
 		copy(devices, cfg.Devices)
 		for i := range devices {
-			devices[i].IEDName = effectiveIEDName(cfg, devices[i], true)
+			devices[i].IEDName = simulator.EffectiveIEDName(cfg, devices[i], true)
 		}
 		return devices
 	}
-	device := IEC61850DeviceConfig{
+	device := simulator.IEC61850DeviceConfig{
 		Address: cfg.Address,
 		GOOSE:   cfg.GOOSE,
 	}
-	if sim != nil && len(sim.batteries) > 0 {
-		device.PCSSlaveID = sim.batteries[0].pcs.SlaveID
+	if sim != nil {
+		batteries := sim.BatteryUnits()
+		if len(batteries) > 0 {
+			device.PCSSlaveID = batteries[0].PCSSlaveID()
+		}
 	}
-	device.IEDName = effectiveIEDName(cfg, device, false)
-	return []IEC61850DeviceConfig{device}
+	device.IEDName = simulator.EffectiveIEDName(cfg, device, false)
+	return []simulator.IEC61850DeviceConfig{device}
 }
 
-func startIEC61850Device(cfg IEC61850DeviceConfig, sim *Simulator) (*iec61850Server, error) {
+func startIEC61850Device(cfg simulator.IEC61850DeviceConfig, sim *simulator.Simulator) (*iec61850Server, error) {
 	battery, err := findIEC61850Battery(sim, cfg.PCSSlaveID)
 	if err != nil {
 		return nil, err
 	}
-	host, port, err := splitIEC61850Address(cfg.Address)
+	host, port, err := simulator.SplitIEC61850Address(cfg.Address)
 	if err != nil {
 		return nil, err
 	}
@@ -153,20 +157,19 @@ func startIEC61850Device(cfg IEC61850DeviceConfig, sim *Simulator) (*iec61850Ser
 	return svc, nil
 }
 
-func findIEC61850Battery(sim *Simulator, pcsSlaveID uint8) (*BatteryUnit, error) {
+func findIEC61850Battery(sim *simulator.Simulator, pcsSlaveID uint8) (*simulator.BatteryUnit, error) {
 	if sim == nil {
 		return nil, fmt.Errorf("IEC 61850 requires simulator")
 	}
 	if pcsSlaveID == 0 {
-		if len(sim.batteries) == 0 {
+		batteries := sim.BatteryUnits()
+		if len(batteries) == 0 {
 			return nil, fmt.Errorf("IEC 61850 requires at least one battery unit")
 		}
-		return sim.batteries[0], nil
+		return batteries[0], nil
 	}
-	for _, battery := range sim.batteries {
-		if battery.pcs.SlaveID == pcsSlaveID {
-			return battery, nil
-		}
+	if battery, ok := sim.BatteryUnitByPCSSlaveID(pcsSlaveID); ok {
+		return battery, nil
 	}
 	return nil, fmt.Errorf("IEC 61850 references unknown PCS slave %d", pcsSlaveID)
 }
@@ -199,7 +202,7 @@ func loadIEC61850Model(iedName string) (*iec61850.IedModel, error) {
 	return model, nil
 }
 
-func newIEC61850Service(sim *Simulator, battery *BatteryUnit, model *iec61850.IedModel, server *iec61850.IedServer, iedName string) (*iec61850Server, error) {
+func newIEC61850Service(sim *simulator.Simulator, battery *simulator.BatteryUnit, model *iec61850.IedModel, server *iec61850.IedServer, iedName string) (*iec61850Server, error) {
 	if iedName == "" {
 		iedName = "TEMPLATE"
 	}
@@ -260,7 +263,7 @@ func (s *iec61850Server) ctlActivePower(_ *iec61850.ModelNode, _ *iec61850.Contr
 		return iec61850.CONTROL_RESULT_FAILED
 	}
 	raw := int16(math.Round(float64(kw * 10)))
-	if s.writeTargetPCS(RegPCSPowerCmd, uint16(raw)) != nil {
+	if s.writeTargetPCS(simulator.RegPCSPowerCmd, uint16(raw)) != nil {
 		return iec61850.CONTROL_RESULT_FAILED
 	}
 	return iec61850.CONTROL_RESULT_OK
@@ -284,13 +287,13 @@ func (s *iec61850Server) ctlPCSCommand(_ *iec61850.ModelNode, _ *iec61850.Contro
 	var err error
 	switch cmd {
 	case 0:
-		err = s.writeTargetPCS(RegPCSShutdown, 1)
+		err = s.writeTargetPCS(simulator.RegPCSShutdown, 1)
 	case 1:
-		err = s.writeTargetPCS(RegPCSStartup, 1)
+		err = s.writeTargetPCS(simulator.RegPCSStartup, 1)
 	case 2:
-		err = s.writeTargetPCS(RegPCSFaultReset, 1)
+		err = s.writeTargetPCS(simulator.RegPCSFaultReset, 1)
 	case 3:
-		err = s.writeTargetPCS(RegPCSPowerCmd, 0)
+		err = s.writeTargetPCS(simulator.RegPCSPowerCmd, 0)
 	default:
 		return iec61850.CONTROL_RESULT_FAILED
 	}
@@ -305,7 +308,7 @@ func (s *iec61850Server) ctlRunMode(_ *iec61850.ModelNode, _ *iec61850.ControlAc
 	if !ok || (mode != 0 && mode != 1) {
 		return iec61850.CONTROL_RESULT_FAILED
 	}
-	if s.writeTargetPCS(RegPCSGridMode, uint16(mode)) != nil {
+	if s.writeTargetPCS(simulator.RegPCSGridMode, uint16(mode)) != nil {
 		return iec61850.CONTROL_RESULT_FAILED
 	}
 	return iec61850.CONTROL_RESULT_OK
@@ -316,9 +319,9 @@ func (s *iec61850Server) ctlStartStop(_ *iec61850.ModelNode, _ *iec61850.Control
 	if !ok {
 		return iec61850.CONTROL_RESULT_FAILED
 	}
-	var reg uint16 = RegPCSShutdown
+	var reg uint16 = simulator.RegPCSShutdown
 	if on {
-		reg = RegPCSStartup
+		reg = simulator.RegPCSStartup
 	}
 	if s.writeTargetPCS(reg, 1) != nil {
 		return iec61850.CONTROL_RESULT_FAILED
@@ -331,7 +334,7 @@ func (s *iec61850Server) ctlFaultReset(_ *iec61850.ModelNode, _ *iec61850.Contro
 	if !ok || !on {
 		return iec61850.CONTROL_RESULT_FAILED
 	}
-	if s.writeTargetPCS(RegPCSFaultReset, 1) != nil {
+	if s.writeTargetPCS(simulator.RegPCSFaultReset, 1) != nil {
 		return iec61850.CONTROL_RESULT_FAILED
 	}
 	return iec61850.CONTROL_RESULT_OK
@@ -342,7 +345,7 @@ func (s *iec61850Server) ctlStandby(_ *iec61850.ModelNode, _ *iec61850.ControlAc
 	if !ok || !on {
 		return iec61850.CONTROL_RESULT_FAILED
 	}
-	if s.writeTargetPCS(RegPCSPowerCmd, 0) != nil {
+	if s.writeTargetPCS(simulator.RegPCSPowerCmd, 0) != nil {
 		return iec61850.CONTROL_RESULT_FAILED
 	}
 	return iec61850.CONTROL_RESULT_OK
@@ -353,7 +356,7 @@ func (s *iec61850Server) Sync() {
 	if bu == nil {
 		return
 	}
-	nowMs := int64(s.sim.nowFunc().UnixMilli())
+	nowMs := int64(s.sim.Now().UnixMilli())
 
 	s.server.LockDataModel()
 	s.updatePcsMeas(bu, nowMs)
@@ -369,66 +372,66 @@ func (s *iec61850Server) Sync() {
 }
 
 // gooseValues 汇总 dsGOOSE1 / PIGO 的 9 个值；顺序由现场 CID 固定。
-func (s *iec61850Server) gooseValues(bu *BatteryUnit, nowMs int64) iec61850TelemetryValues {
-	pcs := bu.pcs
-	bms := bu.bms
+func (s *iec61850Server) gooseValues(bu *simulator.BatteryUnit, nowMs int64) iec61850TelemetryValues {
+	pcs := bu.PCSBank()
+	bms := bu.BMSBank()
 	return iec61850TelemetryValues{
 		nowMs:             nowMs,
-		ratedPowerKW:      float32(bu.ratedPowerKW),
-		socPercent:        float32(bms.ReadU16(RegBMSSOC)) / 10,
+		ratedPowerKW:      float32(bu.RatedPowerKW()),
+		socPercent:        float32(bms.ReadU16(simulator.RegBMSSOC)) / 10,
 		pcsStatus:         int32(iec61850PCSStatus(pcs)),
-		activeKW:          float32(uint16ToInt16(pcs.ReadU16(RegPCSTotalActivePW))) / 10,
-		reactiveKVAr:      float32(uint16ToInt16(pcs.ReadU16(RegPCSTotalReactPW))) / 10,
-		maxChargeKW:       float32(bms.ReadU16(RegBMSMaxChargePW)) / 10,
-		maxDischargeKW:    float32(bms.ReadU16(RegBMSMaxDischargePW)) / 10,
-		activeSetpointKW:  float32(uint16ToInt16(pcs.ReadU16(RegPCSPowerCmd))) / 10,
+		activeKW:          float32(registerInt16(pcs.ReadU16(simulator.RegPCSTotalActivePW))) / 10,
+		reactiveKVAr:      float32(registerInt16(pcs.ReadU16(simulator.RegPCSTotalReactPW))) / 10,
+		maxChargeKW:       float32(bms.ReadU16(simulator.RegBMSMaxChargePW)) / 10,
+		maxDischargeKW:    float32(bms.ReadU16(simulator.RegBMSMaxDischargePW)) / 10,
+		activeSetpointKW:  float32(registerInt16(pcs.ReadU16(simulator.RegPCSPowerCmd))) / 10,
 		reactSetpointKVAr: s.reactiveSetpointKVAr,
 	}
 }
 
 // updatePcsMeas 填 MEAS/measGGIO1（PCS 遥测）核心点位；现场预留/累计电量等点保持默认 0。
-func (s *iec61850Server) updatePcsMeas(bu *BatteryUnit, nowMs int64) {
-	pcs := bu.pcs
-	bms := bu.bms
-	s.setFloat(s.refMeasPcs+".AnIn1", float32(pcs.ReadU16(RegPCSVoltageA))/10, nowMs)
-	s.setFloat(s.refMeasPcs+".AnIn2", float32(pcs.ReadU16(RegPCSVoltageB))/10, nowMs)
-	s.setFloat(s.refMeasPcs+".AnIn3", float32(pcs.ReadU16(RegPCSVoltageC))/10, nowMs)
-	s.setFloat(s.refMeasPcs+".AnIn4", float32(uint16ToInt16(pcs.ReadU16(RegPCSCurrentA)))/10, nowMs)
-	s.setFloat(s.refMeasPcs+".AnIn5", float32(uint16ToInt16(pcs.ReadU16(RegPCSCurrentB)))/10, nowMs)
-	s.setFloat(s.refMeasPcs+".AnIn6", float32(uint16ToInt16(pcs.ReadU16(RegPCSCurrentC)))/10, nowMs)
-	s.setFloat(s.refMeasPcs+".AnIn7", float32(uint16ToInt16(pcs.ReadU16(RegPCSTotalActivePW)))/10, nowMs)
-	s.setFloat(s.refMeasPcs+".AnIn8", float32(uint16ToInt16(pcs.ReadU16(RegPCSTotalReactPW)))/10, nowMs)
-	s.setFloat(s.refMeasPcs+".AnIn9", float32(uint16ToInt16(pcs.ReadU16(RegPCSPowerFactor)))/100, nowMs)
-	s.setFloat(s.refMeasPcs+".AnIn10", float32(uint16ToInt16(bms.ReadU16(RegBMSPower)))/10, nowMs)
-	s.setFloat(s.refMeasPcs+".AnIn11", float32(pcs.ReadU16(RegPCSTotalApparent))/10, nowMs)
-	s.setFloat(s.refMeasPcs+".AnIn12", float32(bms.ReadU16(RegBMSMaxDischargePW))/10, nowMs)
-	s.setFloat(s.refMeasPcs+".AnIn13", float32(bms.ReadU16(RegBMSMaxChargePW))/10, nowMs)
-	s.setFloat(s.refMeasPcs+".AnIn14", float32(bms.ReadU16(RegBMSMaxChargePW))/10, nowMs)
-	s.setFloat(s.refMeasPcs+".AnIn15", float32(bms.ReadU16(RegBMSMaxDischargePW))/10, nowMs)
+func (s *iec61850Server) updatePcsMeas(bu *simulator.BatteryUnit, nowMs int64) {
+	pcs := bu.PCSBank()
+	bms := bu.BMSBank()
+	s.setFloat(s.refMeasPcs+".AnIn1", float32(pcs.ReadU16(simulator.RegPCSVoltageA))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn2", float32(pcs.ReadU16(simulator.RegPCSVoltageB))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn3", float32(pcs.ReadU16(simulator.RegPCSVoltageC))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn4", float32(registerInt16(pcs.ReadU16(simulator.RegPCSCurrentA)))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn5", float32(registerInt16(pcs.ReadU16(simulator.RegPCSCurrentB)))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn6", float32(registerInt16(pcs.ReadU16(simulator.RegPCSCurrentC)))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn7", float32(registerInt16(pcs.ReadU16(simulator.RegPCSTotalActivePW)))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn8", float32(registerInt16(pcs.ReadU16(simulator.RegPCSTotalReactPW)))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn9", float32(registerInt16(pcs.ReadU16(simulator.RegPCSPowerFactor)))/100, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn10", float32(registerInt16(bms.ReadU16(simulator.RegBMSPower)))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn11", float32(pcs.ReadU16(simulator.RegPCSTotalApparent))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn12", float32(bms.ReadU16(simulator.RegBMSMaxDischargePW))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn13", float32(bms.ReadU16(simulator.RegBMSMaxChargePW))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn14", float32(bms.ReadU16(simulator.RegBMSMaxChargePW))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn15", float32(bms.ReadU16(simulator.RegBMSMaxDischargePW))/10, nowMs)
 	// 直流侧（对齐现场 CID）：AnIn41=电池电压，AnIn42=直流电流；
 	// 复用 syncPCSDC 写入的 PCS 直流寄存器，确保 MMS 与 Modbus 两个北向口一致
-	s.setFloat(s.refMeasPcs+".AnIn41", float32(pcs.ReadU16(RegPCSDCVoltage))/10, nowMs)
-	s.setFloat(s.refMeasPcs+".AnIn42", float32(uint16ToInt16(pcs.ReadU16(RegPCSDCCurrent)))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn41", float32(pcs.ReadU16(simulator.RegPCSDCVoltage))/10, nowMs)
+	s.setFloat(s.refMeasPcs+".AnIn42", float32(registerInt16(pcs.ReadU16(simulator.RegPCSDCCurrent)))/10, nowMs)
 	// AnIn45=电网频率（对齐现场 CID 与设备级点表 grid_frequency←AnIn45）；
-	// 此前只在 Modbus 口写了 RegPCSFrequency，MMS 口漏发导致 MMS 客户端读到默认 0
-	s.setFloat(s.refMeasPcs+".AnIn45", float32(pcs.ReadU16(RegPCSFrequency))/100, nowMs)
+	// 此前只在 Modbus 口写了 simulator.RegPCSFrequency，MMS 口漏发导致 MMS 客户端读到默认 0
+	s.setFloat(s.refMeasPcs+".AnIn45", float32(pcs.ReadU16(simulator.RegPCSFrequency))/100, nowMs)
 }
 
 // updateBmsMeas 填 MEAS/measGGIO2（BMS 遥测）核心点位。
-func (s *iec61850Server) updateBmsMeas(bu *BatteryUnit, nowMs int64) {
-	bms := bu.bms
-	s.setFloat(s.refMeasBms+".AnIn1", float32(bms.ReadU16(RegBMSSOC))/10, nowMs)
-	s.setFloat(s.refMeasBms+".AnIn2", float32(bms.ReadU16(RegBMSMaxChargePW))/10, nowMs)
-	s.setFloat(s.refMeasBms+".AnIn3", float32(bms.ReadU16(RegBMSMaxDischargePW))/10, nowMs)
-	s.setFloat(s.refMeasBms+".AnIn4", float32(bms.ReadU16(RegBMSSysStatus)), nowMs)
-	s.setFloat(s.refMeasBms+".AnIn5", float32(bms.ReadU16(RegBMSAlarmStatus)), nowMs)
-	s.setFloat(s.refMeasBms+".AnIn6", float32(bms.ReadU16(RegBMSVoltage))/10, nowMs)
-	s.setFloat(s.refMeasBms+".AnIn7", float32(uint16ToInt16(bms.ReadU16(RegBMSCurrent)))/10, nowMs)
-	s.setFloat(s.refMeasBms+".AnIn8", float32(bms.ReadU16(RegBMSMaxChargeI))/10, nowMs)
-	s.setFloat(s.refMeasBms+".AnIn9", float32(bms.ReadU16(RegBMSMaxDischargeI))/10, nowMs)
-	s.setFloat(s.refMeasBms+".AnIn10", float32(bms.ReadU16(RegBMSCellVMax))/1000, nowMs)
-	s.setFloat(s.refMeasBms+".AnIn11", float32(bms.ReadU16(RegBMSCellVMin))/1000, nowMs)
-	s.setFloat(s.refMeasBms+".AnIn12", float32(bms.ReadU16(RegBMSSOH))/10, nowMs)
+func (s *iec61850Server) updateBmsMeas(bu *simulator.BatteryUnit, nowMs int64) {
+	bms := bu.BMSBank()
+	s.setFloat(s.refMeasBms+".AnIn1", float32(bms.ReadU16(simulator.RegBMSSOC))/10, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn2", float32(bms.ReadU16(simulator.RegBMSMaxChargePW))/10, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn3", float32(bms.ReadU16(simulator.RegBMSMaxDischargePW))/10, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn4", float32(bms.ReadU16(simulator.RegBMSSysStatus)), nowMs)
+	s.setFloat(s.refMeasBms+".AnIn5", float32(bms.ReadU16(simulator.RegBMSAlarmStatus)), nowMs)
+	s.setFloat(s.refMeasBms+".AnIn6", float32(bms.ReadU16(simulator.RegBMSVoltage))/10, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn7", float32(registerInt16(bms.ReadU16(simulator.RegBMSCurrent)))/10, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn8", float32(bms.ReadU16(simulator.RegBMSMaxChargeI))/10, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn9", float32(bms.ReadU16(simulator.RegBMSMaxDischargeI))/10, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn10", float32(bms.ReadU16(simulator.RegBMSCellVMax))/1000, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn11", float32(bms.ReadU16(simulator.RegBMSCellVMin))/1000, nowMs)
+	s.setFloat(s.refMeasBms+".AnIn12", float32(bms.ReadU16(simulator.RegBMSSOH))/10, nowMs)
 }
 
 // 告警触发阈值：满充判定与单体过压判定（贴近 cellVoltageFull=3.6V 曲线）。
@@ -447,14 +450,14 @@ const (
 //   - Alm12 直流侧全母线软件欠压 ← PCS 空载启动（BMS 高压未闭合）触发的直流欠压故障
 //   - Alm2  储能电池电压过高     ← 满充（SOC 过高）
 //   - Alm4  电池电压过高         ← 单体最高电压过高
-func (s *iec61850Server) updateAlarms(bu *BatteryUnit, nowMs int64) {
+func (s *iec61850Server) updateAlarms(bu *simulator.BatteryUnit, nowMs int64) {
 	s.setBool(s.refAlarmPcs+".Alm12", bu.PcsDCUnderVoltFault(), nowMs)
 	s.setBool(s.refAlarmPcs+".Alm2", bu.SOC() >= alarmSOCHighPercent, nowMs)
-	s.setBool(s.refAlarmPcs+".Alm4", bu.bms.ReadU16(RegBMSCellVMax) >= alarmCellVMaxHighMV, nowMs)
+	s.setBool(s.refAlarmPcs+".Alm4", bu.BMSBank().ReadU16(simulator.RegBMSCellVMax) >= alarmCellVMaxHighMV, nowMs)
 }
 
 // updatePigo 填 PIGO/measGGIO1（GOOSE 遥测 9 值），并返回这组值供 GOOSE 发布复用。
-func (s *iec61850Server) updatePigo(bu *BatteryUnit, nowMs int64) iec61850TelemetryValues {
+func (s *iec61850Server) updatePigo(bu *simulator.BatteryUnit, nowMs int64) iec61850TelemetryValues {
 	g := s.gooseValues(bu, nowMs)
 	s.setFloat(s.refPigo+".AnIn1", g.ratedPowerKW, nowMs)
 	s.setFloat(s.refPigo+".AnIn2", g.socPercent, nowMs)
@@ -469,23 +472,23 @@ func (s *iec61850Server) updatePigo(bu *BatteryUnit, nowMs int64) iec61850Teleme
 }
 
 // updateSetReadback 把遥调设定值回填到 setGGIO1 各 APC 的 mxVal（MX 读侧）。
-func (s *iec61850Server) updateSetReadback(bu *BatteryUnit, nowMs int64) {
-	pcs := bu.pcs
-	activeSet := float32(uint16ToInt16(pcs.ReadU16(RegPCSPowerCmd))) / 10
+func (s *iec61850Server) updateSetReadback(bu *simulator.BatteryUnit, nowMs int64) {
+	pcs := bu.PCSBank()
+	activeSet := float32(registerInt16(pcs.ReadU16(simulator.RegPCSPowerCmd))) / 10
 	s.setMxVal(s.refCtrlSet+".APCS1", activeSet, nowMs)
 	s.setMxVal(s.refCtrlSet+".APCS2", s.reactiveSetpointKVAr, nowMs)
-	s.setMxVal(s.refCtrlSet+".APCS10", float32(pcs.ReadU16(RegPCSGridMode)), nowMs)
+	s.setMxVal(s.refCtrlSet+".APCS10", float32(pcs.ReadU16(simulator.RegPCSGridMode)), nowMs)
 }
 
-func (s *iec61850Server) configureGOOSE(cfg IEC61850GOOSEConfig) error {
+func (s *iec61850Server) configureGOOSE(cfg simulator.IEC61850GOOSEConfig) error {
 	if !cfg.Enabled {
 		return nil
 	}
-	appID, err := parseIEC61850AppID(cfg.AppID)
+	appID, err := simulator.ParseIEC61850AppID(cfg.AppID)
 	if err != nil {
 		return err
 	}
-	dstMAC, err := parseIEC61850MAC(cfg.DstMAC)
+	dstMAC, err := simulator.ParseIEC61850MAC(cfg.DstMAC)
 	if err != nil {
 		return err
 	}
@@ -628,12 +631,15 @@ func (s *iec61850Server) setMxVal(doRef string, value float32, nowMs int64) {
 	}
 }
 
-func (s *iec61850Server) targetBattery() *BatteryUnit {
+func (s *iec61850Server) targetBattery() *simulator.BatteryUnit {
 	if s.battery != nil {
 		return s.battery
 	}
-	if s.sim != nil && len(s.sim.batteries) > 0 {
-		return s.sim.batteries[0]
+	if s.sim != nil {
+		batteries := s.sim.BatteryUnits()
+		if len(batteries) > 0 {
+			return batteries[0]
+		}
 	}
 	return nil
 }
@@ -643,7 +649,7 @@ func (s *iec61850Server) writeTargetPCS(register, value uint16) error {
 	if bu == nil {
 		return fmt.Errorf("IEC 61850 requires target battery unit")
 	}
-	return s.sim.writeHolding(bu.pcs.SlaveID, register, value)
+	return s.sim.WriteHolding(bu.PCSBank().SlaveID, register, value)
 }
 
 // ctlFloat 从控制 ctlVal 取浮点：APC 的 ctlVal 是 AnalogueValue 结构体（取首元素 f），
@@ -705,14 +711,18 @@ func fitsPCSCommandRegister(kw float32) bool {
 	return raw >= math.MinInt16 && raw <= math.MaxInt16
 }
 
-func iec61850PCSStatus(pcs *SlaveBank) int {
-	if pcs.ReadU16(RegPCSFaultStatus) != 0 {
+func registerInt16(value uint16) int16 {
+	return int16(value)
+}
+
+func iec61850PCSStatus(pcs *simulator.SlaveBank) int {
+	if pcs.ReadU16(simulator.RegPCSFaultStatus) != 0 {
 		return 6
 	}
-	if pcs.ReadU16(RegPCSGridStatus) != 0 && pcs.ReadU16(RegPCSSysStatus) != 1 {
+	if pcs.ReadU16(simulator.RegPCSGridStatus) != 0 && pcs.ReadU16(simulator.RegPCSSysStatus) != 1 {
 		return 5
 	}
-	switch pcs.ReadU16(RegPCSSysStatus) {
+	switch pcs.ReadU16(simulator.RegPCSSysStatus) {
 	case 1:
 		return 0
 	case 2:
