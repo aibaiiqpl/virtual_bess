@@ -314,3 +314,9 @@ GOOSE `dsGOOSE1` 发布 `TEMPLATEPIGO/measGGIO1.AnIn1`-`AnIn9`（额定功率、
 ### 电表（FC 03，Meter slave）
 
 地址在 `registers.go` 中定义，包括能量、三相电压电流、有功/无功/视在、功率因数、频率。
+
+## License
+
+本项目代码以 MIT License 开源，详见 [LICENSE](LICENSE)。
+
+`third_party/` 目录下的第三方代码遵循其各自许可证。
