@@ -13,16 +13,16 @@ BUILD_DIR := build
 all: linux-amd64 linux-arm64 linux-armv7
 
 $(BINARY):
-	go build -o $(BINARY) .
+	go build -o $(BINARY) ./cmd/virtual_bess
 
 linux-amd64:
-	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY)-linux-amd64 .
+	GOOS=linux GOARCH=amd64 go build -o $(BUILD_DIR)/$(BINARY)-linux-amd64 ./cmd/virtual_bess
 
 linux-arm64:
-	GOOS=linux GOARCH=arm64 go build -o $(BUILD_DIR)/$(BINARY)-linux-arm64 .
+	GOOS=linux GOARCH=arm64 go build -o $(BUILD_DIR)/$(BINARY)-linux-arm64 ./cmd/virtual_bess
 
 linux-armv7:
-	GOOS=linux GOARCH=arm GOARM=7 go build -o $(BUILD_DIR)/$(BINARY)-linux-armv7 .
+	GOOS=linux GOARCH=arm GOARM=7 go build -o $(BUILD_DIR)/$(BINARY)-linux-armv7 ./cmd/virtual_bess
 
 clean:
 	rm -rf $(BUILD_DIR) $(BINARY)

@@ -3,10 +3,6 @@
 虚拟储能系统模拟器，通过 Modbus TCP 对外暴露 PCS / BMS / PV / 电表寄存器，用于开发调试。
 单端口、按 **slaveId** 路由，支持同时模拟多套 PCS+BMS 和多台 PV 逆变器。
 
-## 依赖
-
-- [go-common](https://cnb.cool/aiwatt/ems/go-common)（mbserver、zaplog）
-
 ## 拓扑模型
 
 - **电池单元（battery_unit）**：1 PCS slave + 1 BMS slave 紧密配对，可配置 N 套。
@@ -71,14 +67,14 @@ load:
 ## 构建和运行
 
 ```bash
-go build -o virtual_bess .
+go build -o virtual_bess ./cmd/virtual_bess
 ./virtual_bess -config config.yaml
 ```
 
 启用 IEC 61850 MMS 服务端时：
 
 ```bash
-go build -tags iec61850 -o virtual_bess .
+go build -tags iec61850 -o virtual_bess ./cmd/virtual_bess
 ```
 
 并在配置中设置：
