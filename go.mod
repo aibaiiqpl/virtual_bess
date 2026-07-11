@@ -5,6 +5,7 @@ go 1.26
 require (
 	aiwatt.net/ems/go-common v1.1.0
 	github.com/go-bindings/iec61850 v1.0.0
+	golang.org/x/sys v0.38.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 

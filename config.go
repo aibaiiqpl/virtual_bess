@@ -90,6 +90,25 @@ type ModbusConfig struct {
 	Address string `yaml:"address"`
 }
 
+// CANConfig 描述 CAN 南向模拟（博最 BCM CAN 协议，去复用帧布局）。
+// enabled=false（默认）时完全不触碰 CAN 子系统，保持纯 Modbus/61850 行为。
+type CANConfig struct {
+	Enabled bool              `yaml:"enabled"`
+	Devices []CANDeviceConfig `yaml:"devices"`
+}
+
+// CANDeviceConfig 把一个 BMS slave 绑定到一路 CAN 接口上。
+type CANDeviceConfig struct {
+	// BMSSlaveID 复用哪套电池单元的 BMS 寄存器作为 CAN 帧数据源。
+	BMSSlaveID uint8 `yaml:"bms_slave_id"`
+	// Interface CAN 网卡名，如 can0 / vcan0。
+	Interface string `yaml:"interface"`
+	// BitRate 仅记录用途；vcan 忽略，物理 CAN 由 ip link 预设。
+	BitRate int `yaml:"bitrate"`
+	// BroadcastPeriodMs 数据帧广播周期（ms），默认 200。
+	BroadcastPeriodMs int `yaml:"broadcast_period_ms"`
+}
+
 type IEC61850Config struct {
 	Enabled bool                   `yaml:"enabled"`
 	Address string                 `yaml:"address"`
@@ -131,6 +150,7 @@ type StateConfig struct {
 type Config struct {
 	Modbus       ModbusConfig        `yaml:"modbus"`
 	IEC61850     IEC61850Config      `yaml:"iec61850"`
+	CAN          CANConfig           `yaml:"can"`
 	Grid         GridConfig          `yaml:"grid"`
 	PCS          PCSConfig           `yaml:"pcs"`
 	BatteryUnits []BatteryUnitConfig `yaml:"battery_units"`
@@ -237,6 +257,11 @@ func (c *Config) applyDefaults() {
 			bu.SOH = 100.0
 		}
 	}
+	for i := range c.CAN.Devices {
+		if c.CAN.Devices[i].BroadcastPeriodMs <= 0 {
+			c.CAN.Devices[i].BroadcastPeriodMs = 200
+		}
+	}
 }
 
 // validate 校验 slaveId 唯一且非零，至少一个电池单元、一个电表。
@@ -261,6 +286,7 @@ func (c *Config) validate() error {
 	}
 
 	pcsIDs := map[uint8]bool{}
+	bmsIDs := map[uint8]bool{}
 	pvIDs := map[uint8]bool{}
 	loadNames := map[string]bool{}
 
@@ -272,6 +298,10 @@ func (c *Config) validate() error {
 			return err
 		}
 		pcsIDs[bu.PCSSlaveID] = true
+		bmsIDs[bu.BMSSlaveID] = true
+	}
+	if err := c.CAN.validate(bmsIDs); err != nil {
+		return err
 	}
 	if err := c.IEC61850.validate(pcsIDs); err != nil {
 		return err
@@ -332,6 +362,30 @@ func (c *Config) validate() error {
 	for i, th := range c.TemperatureHumid {
 		if err := check(th.SlaveID, fmt.Sprintf("temperature_humidity[%d]", i)); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// validate 校验 CAN 设备引用的 BMS slave 存在、接口非空、无重复接口。
+func (c CANConfig) validate(bmsIDs map[uint8]bool) error {
+	if !c.Enabled {
+		return nil
+	}
+	if len(c.Devices) == 0 {
+		return fmt.Errorf("can.enabled is true but no can.devices configured")
+	}
+	seenIface := map[string]bool{}
+	for i, d := range c.Devices {
+		if d.Interface == "" {
+			return fmt.Errorf("can.devices[%d].interface must be set", i)
+		}
+		if seenIface[d.Interface] {
+			return fmt.Errorf("can.devices[%d].interface %q duplicated", i, d.Interface)
+		}
+		seenIface[d.Interface] = true
+		if !bmsIDs[d.BMSSlaveID] {
+			return fmt.Errorf("can.devices[%d] references unknown bms_slave_id %d", i, d.BMSSlaveID)
 		}
 	}
 	return nil

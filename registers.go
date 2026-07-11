@@ -134,6 +134,8 @@ const (
 	RegBMSVoltage         = 40109 // U16, 0.1 V
 	RegBMSCurrent         = 40110 // S16, 0.1 A
 	RegBMSPower           = 40111 // S16, 0.1 kW
+	RegBMSTotalCharge     = 40112 // U32, 0.1 kWh, cumulative charge energy
+	RegBMSTotalDischarge  = 40114 // U32, 0.1 kWh, cumulative discharge energy
 	RegBMSMaxChargePW     = 40120 // U16, 0.1 kW
 	RegBMSMaxDischargePW  = 40121 // U16, 0.1 kW
 	RegBMSMaxChargeI      = 40122 // U16, 0.1 A

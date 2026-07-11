@@ -56,6 +56,15 @@ func main() {
 	defer iec61850Service.Close()
 	iec61850Service.Sync()
 
+	canPubs, err := startCANPublishers(cfg.CAN, sim)
+	if err != nil {
+		zaplog.Errorf("failed to start CAN publishers: %v", err)
+		iec61850Service.Close()
+		server.Close()
+		os.Exit(1)
+	}
+	defer closeCANPublishers(canPubs)
+
 	// 启动时加载持久化状态
 	if cfg.State.File != "" {
 		st, err := LoadState(cfg.State.File)
