@@ -222,6 +222,11 @@ func (bu *BatteryUnit) syncBMSEnergy(soc, batVoltage, powerKW float64) {
 	}
 	bu.bms.WriteU16(RegBMSCurrent, int16ToUint16(int16(dcCurrentA*10)))
 	bu.bms.WriteU16(RegBMSPower, int16ToUint16(int16(powerKW*10)))
+
+	// 累计充/放电电量（整堆）：标准点 40112/40114，此前未填充。
+	// CAN 南向复用这两个寄存器打包 0x1854 帧，避免在 CAN 侧重复推导标度。
+	bu.bms.WriteU32(RegBMSTotalCharge, uint32(bu.totalChargeKWh*10))
+	bu.bms.WriteU32(RegBMSTotalDischarge, uint32(bu.totalDischargeKWh*10))
 }
 
 func (bu *BatteryUnit) syncBMSLimits(soc, batVoltage float64) {

@@ -275,6 +275,20 @@ func (sim *Simulator) syncAll() {
 	}
 }
 
+// BankForSlave 返回指定 slaveId 的寄存器 bank；用于 CAN 发布器直接读取 BMS 快照。
+// 返回的 bank 内部自带锁，读取线程安全；不存在返回 nil。
+func (sim *Simulator) BankForSlave(slaveID uint8) *SlaveBank {
+	sim.mu.Lock()
+	defer sim.mu.Unlock()
+	return sim.banks[slaveID]
+}
+
+// WriteHoldingExternal 供 CAN 等外部南向通道写入 holding 寄存器并触发写回调，
+// 语义与 Modbus FC6 写入一致（加 sim 锁、走 writeHandlers）。
+func (sim *Simulator) WriteHoldingExternal(slaveID uint8, register, value uint16) error {
+	return sim.writeHolding(slaveID, register, value)
+}
+
 func (sim *Simulator) writeHolding(slaveID uint8, register, value uint16) error {
 	sim.mu.Lock()
 	defer sim.mu.Unlock()

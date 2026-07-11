@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"virtual_bess/internal/mbserver"
+	cansim "virtual_bess/internal/protocol/can"
 	iec61850sim "virtual_bess/internal/protocol/iec61850"
 	"virtual_bess/internal/simulator"
 	"virtual_bess/internal/zaplog"
@@ -57,6 +58,15 @@ func main() {
 	}
 	defer iec61850Service.Close()
 	iec61850Service.Sync()
+
+	canPubs, err := cansim.StartPublishers(cfg.CAN, sim)
+	if err != nil {
+		zaplog.Errorf("failed to start CAN publishers: %v", err)
+		iec61850Service.Close()
+		server.Close()
+		os.Exit(1)
+	}
+	defer cansim.ClosePublishers(canPubs)
 
 	// 启动时加载持久化状态
 	if cfg.State.File != "" {
