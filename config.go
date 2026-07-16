@@ -86,6 +86,19 @@ type THConfig struct {
 	Humidity    float64 `yaml:"humidity"`
 }
 
+// AirConditionerConfig 是风冷 / 液冷空调共用的热工初始条件。
+// 实际 Modbus 寄存器布局由设备类别决定，分别对齐 AC-P-heidun 与 LC-tongfei 点表。
+type AirConditionerConfig struct {
+	SlaveID             uint8   `yaml:"slave_id"`
+	Name                string  `yaml:"name"`
+	IndoorTemperature   float64 `yaml:"indoor_temperature"`
+	AmbientTemperature  float64 `yaml:"ambient_temperature"`
+	CoolingSetpoint     float64 `yaml:"cooling_setpoint"`
+	HeatingSetpoint     float64 `yaml:"heating_setpoint"`
+	CoolingDifferential float64 `yaml:"cooling_differential"`
+	HeatingDifferential float64 `yaml:"heating_differential"`
+}
+
 type ModbusConfig struct {
 	Address string `yaml:"address"`
 }
@@ -157,6 +170,10 @@ type Config struct {
 	PVUnits      []PVUnitConfig      `yaml:"pv_units"`
 	Meters       []MeterConfig       `yaml:"meters"`
 	Loads        []LoadCfg           `yaml:"loads"`
+	// ACUnits 使用 AC-P-heidun 的 Modbus 源寄存器布局。
+	ACUnits []AirConditionerConfig `yaml:"ac_units"`
+	// LCUnits 使用 LC-tongfei 的 Modbus 源寄存器布局。
+	LCUnits []AirConditionerConfig `yaml:"lc_units"`
 	// Fire 消防遥信虚拟设备（可选，nil = 不模拟）。
 	Fire *FireConfig `yaml:"fire"`
 	// TemperatureHumid 温湿度虚拟设备列表（可多台，对齐现场多温湿度仪）。
@@ -189,7 +206,15 @@ func DefaultConfig() Config {
 		}},
 		Meters: []MeterConfig{{SlaveID: 31, Name: "main", IsMain: true}},
 		Loads:  []LoadCfg{{Name: "load", RatedPowerKW: 80}},
-		Log:    LogConfig{Level: "info", Console: true},
+		ACUnits: []AirConditionerConfig{
+			{SlaveID: 41, Name: "ac-1", IndoorTemperature: 30, AmbientTemperature: 32, CoolingSetpoint: 25, HeatingSetpoint: 15, CoolingDifferential: 2, HeatingDifferential: 2},
+			{SlaveID: 42, Name: "ac-2", IndoorTemperature: 29, AmbientTemperature: 31, CoolingSetpoint: 25, HeatingSetpoint: 15, CoolingDifferential: 2, HeatingDifferential: 2},
+		},
+		LCUnits: []AirConditionerConfig{
+			{SlaveID: 51, Name: "lc-1", IndoorTemperature: 30, AmbientTemperature: 32, CoolingSetpoint: 25, HeatingSetpoint: 15, CoolingDifferential: 2, HeatingDifferential: 2},
+			{SlaveID: 52, Name: "lc-2", IndoorTemperature: 29, AmbientTemperature: 31, CoolingSetpoint: 25, HeatingSetpoint: 15, CoolingDifferential: 2, HeatingDifferential: 2},
+		},
+		Log: LogConfig{Level: "info", Console: true},
 	}
 }
 
@@ -261,6 +286,33 @@ func (c *Config) applyDefaults() {
 		if c.CAN.Devices[i].BroadcastPeriodMs <= 0 {
 			c.CAN.Devices[i].BroadcastPeriodMs = 200
 		}
+	}
+	for i := range c.ACUnits {
+		applyAirConditionerDefaults(&c.ACUnits[i])
+	}
+	for i := range c.LCUnits {
+		applyAirConditionerDefaults(&c.LCUnits[i])
+	}
+}
+
+func applyAirConditionerDefaults(cfg *AirConditionerConfig) {
+	if cfg.CoolingSetpoint == 0 {
+		cfg.CoolingSetpoint = 25
+	}
+	if cfg.HeatingSetpoint == 0 {
+		cfg.HeatingSetpoint = 15
+	}
+	if cfg.CoolingDifferential == 0 {
+		cfg.CoolingDifferential = 2
+	}
+	if cfg.HeatingDifferential == 0 {
+		cfg.HeatingDifferential = 2
+	}
+	if cfg.AmbientTemperature == 0 {
+		cfg.AmbientTemperature = 30
+	}
+	if cfg.IndoorTemperature == 0 {
+		cfg.IndoorTemperature = cfg.AmbientTemperature
 	}
 }
 
@@ -363,6 +415,29 @@ func (c *Config) validate() error {
 		if err := check(th.SlaveID, fmt.Sprintf("temperature_humidity[%d]", i)); err != nil {
 			return err
 		}
+	}
+	for i, ac := range c.ACUnits {
+		if err := validateAirConditionerConfig(ac, fmt.Sprintf("ac_units[%d]", i), check); err != nil {
+			return err
+		}
+	}
+	for i, lc := range c.LCUnits {
+		if err := validateAirConditionerConfig(lc, fmt.Sprintf("lc_units[%d]", i), check); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateAirConditionerConfig(cfg AirConditionerConfig, label string, check func(uint8, string) error) error {
+	if err := check(cfg.SlaveID, label); err != nil {
+		return err
+	}
+	if cfg.CoolingDifferential <= 0 || cfg.HeatingDifferential <= 0 {
+		return fmt.Errorf("%s cooling_differential and heating_differential must be positive", label)
+	}
+	if cfg.HeatingSetpoint >= cfg.CoolingSetpoint {
+		return fmt.Errorf("%s heating_setpoint must be lower than cooling_setpoint", label)
 	}
 	return nil
 }

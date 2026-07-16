@@ -40,13 +40,14 @@ type Simulator struct {
 	banks         map[uint8]*SlaveBank
 	writeHandlers map[uint8]func(addr, value uint16)
 
-	batteries  []*BatteryUnit
-	pvs        []*PVUnit
-	meters     []*meterAgg
-	loads      []*Load
-	fires      []*Fire
-	temphumids []*TempHumid
-	weather    *Weather
+	batteries       []*BatteryUnit
+	pvs             []*PVUnit
+	meters          []*meterAgg
+	loads           []*Load
+	fires           []*Fire
+	temphumids      []*TempHumid
+	airConditioners []*AirConditioner
+	weather         *Weather
 
 	gridVoltage float64
 
@@ -160,6 +161,20 @@ func NewSimulator(cfg *Config, server *mbserver.Server) *Simulator {
 		sim.banks[thCfg.SlaveID] = bank
 		sim.temphumids = append(sim.temphumids, NewTempHumid(thCfg, bank))
 	}
+	for _, acCfg := range cfg.ACUnits {
+		bank := NewSlaveBank(acCfg.SlaveID, false)
+		sim.banks[acCfg.SlaveID] = bank
+		ac := NewAirConditioner(airConditionerAC, acCfg, bank)
+		sim.airConditioners = append(sim.airConditioners, ac)
+		sim.writeHandlers[acCfg.SlaveID] = ac.OnWrite
+	}
+	for _, lcCfg := range cfg.LCUnits {
+		bank := NewSlaveBank(lcCfg.SlaveID, false)
+		sim.banks[lcCfg.SlaveID] = bank
+		lc := NewAirConditioner(airConditionerLC, lcCfg, bank)
+		sim.airConditioners = append(sim.airConditioners, lc)
+		sim.writeHandlers[lcCfg.SlaveID] = lc.OnWrite
+	}
 
 	// 初始化：跑一次 weather/load/PV/meter 同步，让寄存器有初值。
 	sim.weather.Update(0)
@@ -204,6 +219,9 @@ func (sim *Simulator) Tick() {
 	for _, th := range sim.temphumids {
 		th.Update(dt)
 	}
+	for _, ac := range sim.airConditioners {
+		ac.Update(dt)
+	}
 
 	sim.updateMeters(dt)
 	sim.syncAll()
@@ -245,6 +263,9 @@ func (sim *Simulator) syncAll() {
 	}
 	for _, th := range sim.temphumids {
 		th.Sync()
+	}
+	for _, ac := range sim.airConditioners {
+		ac.Sync()
 	}
 }
 

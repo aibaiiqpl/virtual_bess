@@ -65,6 +65,45 @@ loads:
   - name: aux
     rated_power_kw: 16
 
+# 空调：每台设备使用独立 Modbus slave。
+# 风冷采用 AC-P-heidun.csv 的源寄存器布局；液冷采用 LC-tongfei.csv 的源寄存器布局。
+# 启动后状态机根据室内温度、制冷/制热设定及回差自动切换制冷、制热、待机。
+ac_units:
+  - slave_id: 41
+    name: ac-1
+    indoor_temperature: 30
+    ambient_temperature: 32
+    cooling_setpoint: 25
+    heating_setpoint: 15
+    cooling_differential: 2
+    heating_differential: 2
+  - slave_id: 42
+    name: ac-2
+    indoor_temperature: 29
+    ambient_temperature: 31
+    cooling_setpoint: 25
+    heating_setpoint: 15
+    cooling_differential: 2
+    heating_differential: 2
+
+lc_units:
+  - slave_id: 51
+    name: lc-1
+    indoor_temperature: 30
+    ambient_temperature: 32
+    cooling_setpoint: 25
+    heating_setpoint: 15
+    cooling_differential: 2
+    heating_differential: 2
+  - slave_id: 52
+    name: lc-2
+    indoor_temperature: 29
+    ambient_temperature: 31
+    cooling_setpoint: 25
+    heating_setpoint: 15
+    cooling_differential: 2
+    heating_differential: 2
+
 # 电表：
 #   - 31 main：6.6kV 关口表（PCC），is_main 聚合全部 PCS + 站用辅助负荷。
 #   - 32 aux ：500V 辅助/站用电表，本质是负载电表，计量站用辅助负荷 aux。
