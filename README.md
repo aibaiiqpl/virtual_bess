@@ -1,7 +1,7 @@
 # Virtual BESS
 
-虚拟储能系统模拟器，通过 Modbus TCP 和 IEC 61850 MMS / GOOSE 对外暴露 PCS / BMS / PV / 电表等虚拟设备，用于 EMS 开发调试和自动化回归测试。
-Modbus TCP 单端口、按 **slaveId** 路由；IEC 61850 支持按多端点 IED 名暴露多套 PCS/BMS 仿真。
+虚拟储能系统模拟器，通过 Modbus TCP 和 IEC 61850 MMS / GOOSE 对外暴露 PCS / BMS / PV / 电表 / 空调等虚拟设备，用于 EMS 开发调试和自动化回归测试。
+Modbus TCP 单端口、按 **slaveId** 路由，支持多套 PCS+BMS、多台 PV 逆变器及风冷/液冷空调；IEC 61850 支持按多端点 IED 名暴露多套 PCS/BMS 仿真。
 
 ## 项目背景
 
@@ -15,6 +15,8 @@ Virtual BESS 起源于 EMS 开发过程中的联调和回归测试需求。真�
 - **PV 单元（pv_unit）**：1 slave 一套，可配置 M 套，所有 PV 共享同一份随机天气。
 - **电表（meter）**：单台，挂在 PCC 点，聚合所有 PCS/PV/Load 的功率。
 - **负载（load）**：单台，纯内部模拟，不暴露到 modbus。
+- **风冷空调（ac_units）**：独立 slave，按温度设定和回差自动制冷/制热/待机；源寄存器兼容 `AC-P-heidun.csv`。
+- **液冷空调（lc_units）**：独立 slave，模拟进回水温度、压力与压缩机状态；源寄存器兼容 `LC-tongfei.csv`。
 
 电表入网功率公式：
 ```
@@ -66,9 +68,47 @@ meter:
 
 load:
   rated_power_kw: 80
+
+ac_units:
+  - slave_id: 41
+    name: ac-1
+    indoor_temperature: 30
+    ambient_temperature: 32
+    cooling_setpoint: 25
+    heating_setpoint: 15
+    cooling_differential: 2
+    heating_differential: 2
+  - slave_id: 42
+    name: ac-2
+    indoor_temperature: 29
+    ambient_temperature: 31
+
+lc_units:
+  - slave_id: 51
+    name: lc-1
+    indoor_temperature: 30
+    ambient_temperature: 32
+    cooling_setpoint: 25
+    heating_setpoint: 15
+    cooling_differential: 2
+    heating_differential: 2
+  - slave_id: 52
+    name: lc-2
+    indoor_temperature: 29
+    ambient_temperature: 31
 ```
 
 启动时校验：所有 slave_id 不能为 0 且不能重复，至少 1 个 battery_unit。
+
+### 空调点位
+
+每个空调都是独立 Modbus slave。默认配置提供风冷 `41/42`、液冷 `51/52`，满足 AC1/AC2 和 LCU1/LCU2 的分设备映射需求。EMU-V2.0 的目标块分别是 AC `20000–20049` / `20050–20099`，LC `21000–21049` / `21050–21099`；应通过每台设备各自 CSV 映射，不能把不同 slave 合并为一个点表设备。
+
+风冷源地址使用 [AC-P-heidun.csv](../csv-config/docs/AC-P-heidun/AC-P-heidun.csv)：`0x106` 写 `1/0` 启停，`0x100/0x104` 写制冷/制热设定（S16，0.1℃），`0x101/0x105` 写制冷/制热回差（S16，0.1℃），`0x116` 读状态（0 关机/待机、2 制冷、3 制热），`0x10B` 读室内温度（S16，0.1℃）。
+
+液冷源地址使用 [LC-tongfei.csv](../csv-config/docs/LC-tongfei/LC-tongfei.csv)：`0x300` 写 `1` 开机、`2` 关机、`4` 复位；`0x1003/0x1005` 写制冷/制热设定（整数℃），`0x1004/0x1006` 写制冷/制热回差（整数℃）；`0x0000` 高字节读状态（0 关机、1 制冷、2 制热），`0x0003/0x0004/0x0008` 分别读供水/回水/进气温度（S16，0.1℃），`0x0012/0x0013` 读供回水压力（U16，0.1kPa）。
+
+空调启用后，当室温达到制冷点时进入制冷，降至“制冷点 − 回差”后待机；低于制热点时进入制热，升至“制热点 + 回差”后待机。关闭命令立即返回关闭/待机状态。
 
 ## 构建和运行
 
