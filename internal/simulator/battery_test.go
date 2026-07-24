@@ -57,6 +57,93 @@ func TestPowerCommandAlias3010DoesNotApplyInLocalMode(t *testing.T) {
 	assertPowerCommandRegisters(t, bu, 500)
 }
 
+func TestReactivePowerCommandWritesTotalAndPhaseOutputs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  int16
+		want float64
+	}{
+		{name: "inductive", raw: 240, want: 24},
+		{name: "capacitive", raw: -240, want: -24},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			bu := newReadyBattery(t)
+			bu.pcs.WriteU16(RegPCSReactivePowerCmd, int16ToUint16(tc.raw))
+
+			bu.ProcessPowerCommand()
+			assertPowerNear(t, bu.actualReactiveKVAr, tc.want)
+			bu.Sync()
+
+			totalRaw := uint16ToInt16(bu.pcs.ReadU16(RegPCSTotalReactPW))
+			if totalRaw != int16(bu.actualReactiveKVAr*10) {
+				t.Fatalf("total reactive power = %d, want %d", totalRaw, int16(bu.actualReactiveKVAr*10))
+			}
+			phaseRaw := int16(bu.actualReactiveKVAr / 3 * 10)
+			for _, reg := range []uint16{RegPCSReactPWA, RegPCSReactPWB, RegPCSReactPWC} {
+				if got := uint16ToInt16(bu.pcs.ReadU16(reg)); got != phaseRaw {
+					t.Fatalf("phase reactive power at %d = %d, want %d", reg, got, phaseRaw)
+				}
+			}
+			if got := bu.pcs.ReadU16(RegPCSPowerFactor); got != 0 {
+				t.Fatalf("power factor for reactive-only output = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestReactivePowerCommandDoesNotApplyWhenPCSStopped(t *testing.T) {
+	bu := newReadyBattery(t)
+	bu.pcsRunning = false
+	bu.actualReactiveKVAr = 12.3
+	bu.pcs.WriteU16(RegPCSReactivePowerCmd, 240)
+
+	bu.ProcessPowerCommand()
+	bu.Sync()
+
+	if bu.actualReactiveKVAr != 0 {
+		t.Fatalf("actualReactiveKVAr = %v, want 0", bu.actualReactiveKVAr)
+	}
+	if got := bu.pcs.ReadU16(RegPCSTotalReactPW); got != 0 {
+		t.Fatalf("total reactive power = %d, want 0", got)
+	}
+}
+
+func TestReactivePowerUpdatesApparentPowerAndPowerFactor(t *testing.T) {
+	bu := newReadyBattery(t)
+	bu.actualPowerKW = 30
+	bu.actualReactiveKVAr = 40
+
+	bu.Sync()
+
+	if got := bu.pcs.ReadU16(RegPCSTotalApparent); got != 500 {
+		t.Fatalf("apparent power = %d, want 500", got)
+	}
+	if got := bu.pcs.ReadU16(RegPCSPowerFactor); got != 60 {
+		t.Fatalf("power factor = %d, want 60", got)
+	}
+	if got := bu.pcs.ReadU16(RegSysRunning); got != 1 {
+		t.Fatalf("system running = %d, want 1", got)
+	}
+}
+
+func TestSimulatorRoutesReactivePowerWriteToPCSOutput(t *testing.T) {
+	sim := newTestSimulator(t)
+	raw := int16ToUint16(-250)
+	if err := sim.WriteHolding(1, RegPCSReactivePowerCmd, raw); err != nil {
+		t.Fatalf("write reactive power: %v", err)
+	}
+
+	sim.Tick()
+
+	pcs := sim.BatteryUnits()[0].PCSBank()
+	if got := pcs.ReadU16(RegPCSReactivePowerCmd); got != raw {
+		t.Fatalf("reactive command = %d, want %d", got, raw)
+	}
+	if got := uint16ToInt16(pcs.ReadU16(RegPCSTotalReactPW)); got >= 0 {
+		t.Fatalf("reactive output = %d, want negative capacitive output", got)
+	}
+}
+
 func assertPowerCommandRegisters(t *testing.T, bu *BatteryUnit, want uint16) {
 	t.Helper()
 	if got := bu.pcs.ReadU16(RegPCSPowerCmd); got != want {

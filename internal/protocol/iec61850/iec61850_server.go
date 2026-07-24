@@ -42,11 +42,10 @@ type iec61850Server struct {
 	// 对象引用 -> 模型节点缓存，避免每个 Sync tick 重复字符串解析。
 	nodeCache map[string]*iec61850.ModelNode
 
-	goosePublisher       *iec61850.GoosePublisher
-	gooseInterval        time.Duration
-	gooseLastPublish     time.Time
-	gooseTimeAllowedMS   uint32
-	reactiveSetpointKVAr float32
+	goosePublisher     *iec61850.GoosePublisher
+	gooseInterval      time.Duration
+	gooseLastPublish   time.Time
+	gooseTimeAllowedMS uint32
 }
 
 type iec61850MultiServer struct {
@@ -271,11 +270,13 @@ func (s *iec61850Server) ctlActivePower(_ *iec61850.ModelNode, _ *iec61850.Contr
 
 func (s *iec61850Server) ctlReactivePower(_ *iec61850.ModelNode, _ *iec61850.ControlAction, v *iec61850.MmsValue, _ bool) iec61850.ControlHandlerResult {
 	kvar, ok := ctlFloat(v)
-	if !ok {
+	if !ok || !fitsPCSCommandRegister(kvar) {
 		return iec61850.CONTROL_RESULT_FAILED
 	}
-	// 仿真器寄存器无无功设定项，仅缓存做回读与 GOOSE 上送。
-	s.reactiveSetpointKVAr = kvar
+	raw := int16(math.Round(float64(kvar * 10)))
+	if s.writeTargetPCS(simulator.RegPCSReactivePowerCmd, uint16(raw)) != nil {
+		return iec61850.CONTROL_RESULT_FAILED
+	}
 	return iec61850.CONTROL_RESULT_OK
 }
 
@@ -294,6 +295,9 @@ func (s *iec61850Server) ctlPCSCommand(_ *iec61850.ModelNode, _ *iec61850.Contro
 		err = s.writeTargetPCS(simulator.RegPCSFaultReset, 1)
 	case 3:
 		err = s.writeTargetPCS(simulator.RegPCSPowerCmd, 0)
+		if err == nil {
+			err = s.writeTargetPCS(simulator.RegPCSReactivePowerCmd, 0)
+		}
 	default:
 		return iec61850.CONTROL_RESULT_FAILED
 	}
@@ -348,6 +352,9 @@ func (s *iec61850Server) ctlStandby(_ *iec61850.ModelNode, _ *iec61850.ControlAc
 	if s.writeTargetPCS(simulator.RegPCSPowerCmd, 0) != nil {
 		return iec61850.CONTROL_RESULT_FAILED
 	}
+	if s.writeTargetPCS(simulator.RegPCSReactivePowerCmd, 0) != nil {
+		return iec61850.CONTROL_RESULT_FAILED
+	}
 	return iec61850.CONTROL_RESULT_OK
 }
 
@@ -385,7 +392,7 @@ func (s *iec61850Server) gooseValues(bu *simulator.BatteryUnit, nowMs int64) iec
 		maxChargeKW:       float32(bms.ReadU16(simulator.RegBMSMaxChargePW)) / 10,
 		maxDischargeKW:    float32(bms.ReadU16(simulator.RegBMSMaxDischargePW)) / 10,
 		activeSetpointKW:  float32(registerInt16(pcs.ReadU16(simulator.RegPCSPowerCmd))) / 10,
-		reactSetpointKVAr: s.reactiveSetpointKVAr,
+		reactSetpointKVAr: float32(registerInt16(pcs.ReadU16(simulator.RegPCSReactivePowerCmd))) / 10,
 	}
 }
 
@@ -475,8 +482,9 @@ func (s *iec61850Server) updatePigo(bu *simulator.BatteryUnit, nowMs int64) iec6
 func (s *iec61850Server) updateSetReadback(bu *simulator.BatteryUnit, nowMs int64) {
 	pcs := bu.PCSBank()
 	activeSet := float32(registerInt16(pcs.ReadU16(simulator.RegPCSPowerCmd))) / 10
+	reactiveSet := float32(registerInt16(pcs.ReadU16(simulator.RegPCSReactivePowerCmd))) / 10
 	s.setMxVal(s.refCtrlSet+".APCS1", activeSet, nowMs)
-	s.setMxVal(s.refCtrlSet+".APCS2", s.reactiveSetpointKVAr, nowMs)
+	s.setMxVal(s.refCtrlSet+".APCS2", reactiveSet, nowMs)
 	s.setMxVal(s.refCtrlSet+".APCS10", float32(pcs.ReadU16(simulator.RegPCSGridMode)), nowMs)
 }
 

@@ -29,6 +29,7 @@ type BatteryUnit struct {
 	remoteMode           bool
 	gridTied             bool
 	actualPowerKW        float64
+	actualReactiveKVAr   float64
 	lastPowerCmdRaw      uint16
 	lastPowerCmdAliasRaw uint16
 	// PCS DC 欠压故障（HV 未合时尝试开机，或运行中 HV 被拉开）；置位后需通过故障复位清除
@@ -156,6 +157,7 @@ func (bu *BatteryUnit) ProcessBMSControls() {
 		}
 		bu.bmsHVClosed = false
 		bu.actualPowerKW = 0
+		bu.actualReactiveKVAr = 0
 		bu.bms.WriteU16(RegBMSOpenHV, 0)
 	}
 	if bu.bms.ReadU16(RegBMSFaultReset) == 1 {
@@ -184,12 +186,14 @@ func (bu *BatteryUnit) ProcessPCSControls() {
 		}
 		bu.pcsRunning = false
 		bu.actualPowerKW = 0
+		bu.actualReactiveKVAr = 0
 		bu.pcs.WriteU16(RegPCSShutdown, 0)
 	}
 	if bu.pcs.ReadU16(RegPCSEStop) == 1 {
 		zaplog.Warnf("PCS[%d] emergency stop", bu.pcs.SlaveID)
 		bu.pcsRunning = false
 		bu.actualPowerKW = 0
+		bu.actualReactiveKVAr = 0
 		bu.pcs.WriteU16(RegPCSEStop, 0)
 	}
 	if bu.pcs.ReadU16(RegPCSFaultReset) == 1 {
@@ -215,10 +219,21 @@ func (bu *BatteryUnit) ProcessPowerCommand() {
 		// ±0.5% 抖动，模拟真实功率跟踪误差
 		jitter := 1.0 + (rand.Float64()*0.01 - 0.005)
 		bu.actualPowerKW = cmdPowerKW * jitter
+
+		reactiveKVAr := float64(uint16ToInt16(bu.pcs.ReadU16(RegPCSReactivePowerCmd))) * 0.1
+		if reactiveKVAr > bu.ratedPowerKW {
+			reactiveKVAr = bu.ratedPowerKW
+		}
+		if reactiveKVAr < -bu.ratedPowerKW {
+			reactiveKVAr = -bu.ratedPowerKW
+		}
+		reactiveJitter := 1.0 + (rand.Float64()*0.01 - 0.005)
+		bu.actualReactiveKVAr = reactiveKVAr * reactiveJitter
 	} else if !bu.remoteMode {
 		// 就地模式：保持当前功率不变
 	} else {
 		bu.actualPowerKW = 0
+		bu.actualReactiveKVAr = 0
 	}
 }
 

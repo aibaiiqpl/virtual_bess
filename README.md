@@ -167,7 +167,7 @@ iec61850:
 
 1. BMS 合闸：向 **slave 11** 写 40001 = 1
 2. PCS 开机：向 **slave 1** 写 30003 = 1
-3. 下发功率：向 **slave 1** 写 30010 或 3010 = 500（充电 50kW）或 -500（放电 50kW）
+3. 下发功率：向 **slave 1** 写 30010 或 3010 = -500（充电 50kW）或 500（放电 50kW）
 4. 读取状态：从 **slave 11** 读 40105（SOC）、从 **slave 1** 读 30061（PCS 实际功率）
 
 > 未合闸就启动 PCS 会触发直流侧欠压故障（30180 = 1）。
@@ -198,8 +198,8 @@ MMS 通过不同 TCP 端口区分端点，例如 `:102`、`:1102`。GOOSE 是二
 
 | 控制对象 | 类型 | 含义 |
 |----------|------|------|
-| `TEMPLATECTRL/setGGIO1.APCS1` | APC | 有功功率设定，kW，正充负放 |
-| `TEMPLATECTRL/setGGIO1.APCS2` | APC | 无功功率设定，kVar，仅回显 |
+| `TEMPLATECTRL/setGGIO1.APCS1` | APC | 有功功率设定，kW，负充正放 |
+| `TEMPLATECTRL/setGGIO1.APCS2` | APC | 无功功率设定，kVAr，正感性/负容性 |
 | `TEMPLATECTRL/setGGIO1.APCS9` | APC | PCS 控制命令：0 关机，1 开机，2 复位，3 待机 |
 | `TEMPLATECTRL/setGGIO1.APCS10` | APC | PCS 运行模式：0 并网，1 离网 |
 | `TEMPLATECTRL/ctlGAPC1.SPCSO2` | SPC | PCS 开关机：true 开机，false 关机 |
@@ -243,7 +243,8 @@ GOOSE `dsGOOSE1` 发布 `TEMPLATEPIGO/measGGIO1.AnIn1`-`AnIn9`（额定功率、
 | 30004 | 设备关机       | U16  | 1-关机                       |
 | 30005 | 远程急停       | U16  | 1-急停                       |
 | 30006 | 远程/就地设置   | U16  | 0-就地 1-远程，默认 1         |
-| 30010/3010 | 充放电功率指令 | S16  | 0.1kW，正充负放（两个寄存器互为别名） |
+| 30010/3010 | 充放电功率指令 | S16  | 0.1kW，负充正放（两个寄存器互为别名） |
+| 30014 | 无功功率指令 | S16 | 0.1kVAr，正感性/负容性 |
 
 ### PCS 状态（FC 03，PCS slave）
 
