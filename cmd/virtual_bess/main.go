@@ -11,6 +11,7 @@ import (
 	"virtual_bess/internal/mbserver"
 	cansim "virtual_bess/internal/protocol/can"
 	iec61850sim "virtual_bess/internal/protocol/iec61850"
+	xn3477sim "virtual_bess/internal/protocol/xn3477"
 	"virtual_bess/internal/simulator"
 	"virtual_bess/internal/zaplog"
 )
@@ -50,9 +51,18 @@ func main() {
 	zaplog.Infof("modbus TCP server listening on %s", cfg.Modbus.Address)
 
 	sim := simulator.NewSimulator(cfg, server)
+	xn3477Service, err := xn3477sim.StartServer(cfg.XN3477, sim)
+	if err != nil {
+		zaplog.Errorf("failed to start XN3477 servers: %v", err)
+		server.Close()
+		os.Exit(1)
+	}
+	defer xn3477Service.Close()
+
 	iec61850Service, err := iec61850sim.StartServer(cfg.IEC61850, sim)
 	if err != nil {
 		zaplog.Errorf("failed to start IEC 61850 server: %v", err)
+		xn3477Service.Close()
 		server.Close()
 		os.Exit(1)
 	}
@@ -63,6 +73,7 @@ func main() {
 	if err != nil {
 		zaplog.Errorf("failed to start CAN publishers: %v", err)
 		iec61850Service.Close()
+		xn3477Service.Close()
 		server.Close()
 		os.Exit(1)
 	}
@@ -105,6 +116,7 @@ func main() {
 		select {
 		case <-ticker.C:
 			sim.Tick()
+			xn3477Service.Sync()
 			iec61850Service.Sync()
 		case <-saveC:
 			saveNow()

@@ -1,7 +1,7 @@
 # Virtual BESS
 
 虚拟储能系统模拟器，通过 Modbus TCP 和 IEC 61850 MMS / GOOSE 对外暴露 PCS / BMS / PV / 电表 / 空调等虚拟设备，用于 EMS 开发调试和自动化回归测试。
-Modbus TCP 单端口、按 **slaveId** 路由，支持多套 PCS+BMS、多台 PV 逆变器及风冷/液冷空调；IEC 61850 支持按多端点 IED 名暴露多套 PCS/BMS 仿真。
+通用 Modbus TCP 端点按 **slaveId** 路由，支持多套 PCS+BMS、多台 PV 逆变器及风冷/液冷空调；XN3477 BMS 可为每套电池启动独立端点；IEC 61850 支持按多端点 IED 名暴露多套 PCS/BMS 仿真。
 
 ## 项目背景
 
@@ -99,6 +99,29 @@ lc_units:
 ```
 
 启动时校验：所有 slave_id 不能为 0 且不能重复，至少 1 个 battery_unit。
+
+### XN3477 BMS
+
+XN3477 一套电池包含一个 BAU 和多个 BCU，BAU/BCU 共用 TCP 端点、按 slaveId 区分。多套电池会重复使用 BAU slave 1 和 BCU slave 2–13，因此必须配置不同 TCP 端口：
+
+```yaml
+modbus:
+  address: ":18502"
+
+xn3477:
+  enabled: true
+  devices:
+    - bms_slave_id: 11
+      address: ":8502"
+      bau_slave_id: 1
+      cluster_slave_ids: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+    - bms_slave_id: 12
+      address: ":8503"
+      bau_slave_id: 1
+      cluster_slave_ids: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+```
+
+`bms_slave_id` 只用于绑定 `battery_units` 中的内部仿真状态；端点对外使用 `bau_slave_id` 和 `cluster_slave_ids`。点表使用 [XN3477-BMS-Cluster.csv](../csv-config/docs/XN3477-IES900-4EMU/points/bms/XN3477-BMS-Cluster.csv)，读功能码支持 FC03/FC04，控制支持 FC06/FC16。完整六机柜配置见 `configs/bess_6_units_5mwh_2_5mw_xn3477.yaml`。
 
 ### 空调点位
 

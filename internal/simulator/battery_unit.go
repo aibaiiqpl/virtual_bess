@@ -80,6 +80,10 @@ func (bu *BatteryUnit) PCSBank() *SlaveBank { return bu.pcs }
 
 func (bu *BatteryUnit) BMSBank() *SlaveBank { return bu.bms }
 
+func (bu *BatteryUnit) BMSSlaveID() uint8 { return bu.bms.SlaveID }
+
+func (bu *BatteryUnit) ClusterCount() int { return bu.clusterCount }
+
 // PcsDCUnderVoltFault 暴露 PCS 直流侧欠压故障标志，供 61850 服务端置位告警点。
 func (bu *BatteryUnit) PcsDCUnderVoltFault() bool { return bu.pcsDCUnderVoltFault }
 

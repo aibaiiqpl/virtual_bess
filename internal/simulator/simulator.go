@@ -211,6 +211,16 @@ func (sim *Simulator) BatteryUnitByPCSSlaveID(pcsSlaveID uint8) (*BatteryUnit, b
 	return nil, false
 }
 
+// BatteryUnitByBMSSlaveID 按内部 BMS slaveId 查找电池单元。
+func (sim *Simulator) BatteryUnitByBMSSlaveID(bmsSlaveID uint8) (*BatteryUnit, bool) {
+	for _, battery := range sim.batteries {
+		if battery.BMSSlaveID() == bmsSlaveID {
+			return battery, true
+		}
+	}
+	return nil, false
+}
+
 // WriteHolding 写入指定 slave 的 holding 寄存器，并触发对应写回调。
 func (sim *Simulator) WriteHolding(slaveID uint8, register, value uint16) error {
 	return sim.writeHolding(slaveID, register, value)

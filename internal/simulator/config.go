@@ -162,6 +162,7 @@ type StateConfig struct {
 
 type Config struct {
 	Modbus       ModbusConfig        `yaml:"modbus"`
+	XN3477       XN3477Config        `yaml:"xn3477"`
 	IEC61850     IEC61850Config      `yaml:"iec61850"`
 	CAN          CANConfig           `yaml:"can"`
 	Grid         GridConfig          `yaml:"grid"`
@@ -339,6 +340,7 @@ func (c *Config) validate() error {
 
 	pcsIDs := map[uint8]bool{}
 	bmsIDs := map[uint8]bool{}
+	bmsClusterCounts := map[uint8]int{}
 	pvIDs := map[uint8]bool{}
 	loadNames := map[string]bool{}
 
@@ -351,6 +353,10 @@ func (c *Config) validate() error {
 		}
 		pcsIDs[bu.PCSSlaveID] = true
 		bmsIDs[bu.BMSSlaveID] = true
+		bmsClusterCounts[bu.BMSSlaveID] = bu.ClusterCount
+	}
+	if err := c.XN3477.validate(c.Modbus.Address, bmsClusterCounts); err != nil {
+		return err
 	}
 	if err := c.CAN.validate(bmsIDs); err != nil {
 		return err

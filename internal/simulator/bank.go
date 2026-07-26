@@ -49,6 +49,15 @@ func (b *SlaveBank) ReadU16(addr uint16) uint16 {
 	return d[0]
 }
 
+// ReadU32 读一对 holding 寄存器（高位在前）。
+func (b *SlaveBank) ReadU32(addr uint16) uint32 {
+	d, _ := b.Holding.GetData(addr, 2)
+	if len(d) != 2 {
+		return 0
+	}
+	return uint32(d[0])<<16 | uint32(d[1])
+}
+
 // WriteInputU16 写单个 input 寄存器。
 func (b *SlaveBank) WriteInputU16(addr, v uint16) {
 	b.Input.UpdateUint16Data(addr, v)
@@ -62,4 +71,28 @@ func (b *SlaveBank) WriteInputU32(addr uint16, v uint32) {
 // WriteInputS32 写一对有符号 32 位的 input 寄存器（高位在前）。
 func (b *SlaveBank) WriteInputS32(addr uint16, v int32) {
 	b.Input.UpdateUint32Data(addr, uint32(v))
+}
+
+// ReadInputU16 读单个 input 寄存器，地址非法或未配置 input 区时返回 0。
+func (b *SlaveBank) ReadInputU16(addr uint16) uint16 {
+	if b.Input == nil {
+		return 0
+	}
+	d, _ := b.Input.GetData(addr, 1)
+	if len(d) == 0 {
+		return 0
+	}
+	return d[0]
+}
+
+// ReadInputU32 读一对 input 寄存器（高位在前）。
+func (b *SlaveBank) ReadInputU32(addr uint16) uint32 {
+	if b.Input == nil {
+		return 0
+	}
+	d, _ := b.Input.GetData(addr, 2)
+	if len(d) != 2 {
+		return 0
+	}
+	return uint32(d[0])<<16 | uint32(d[1])
 }
