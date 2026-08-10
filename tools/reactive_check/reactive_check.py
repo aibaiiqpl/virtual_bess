@@ -125,12 +125,10 @@ def main():
         emu.write_s16(REG_REACTIVE_SET, 0)
         emu.write_s16(REG_ACTIVE_SET, int(TEST_ACTIVE_KW * 10))
         settle()
-        active = emu.read_s16(REG_TOTAL_ACTIVE) * 0.1
-        # 只校验幅值：MMS 有功设定这条链路上的符号目前是反的（北向 30010 写 +500kW，
-        # PCS 实际充电、北向 30061 回读 -500kW），属于本脚本关注范围之外的已知问题，
-        # 无功各模式只依赖 |P|，故此处不把反号断言进来锁死现状。
-        print(f"  ⚠ 有功符号：北向写 +{TEST_ACTIVE_KW:.0f}kW，30061 回读 {active:+.1f}kW（已知反号）")
-        check("有功遥测幅值 |30061| (kW)", abs(active), TEST_ACTIVE_KW, 10)
+        # 北向 30010 与 30061 都是 EMU-V2.0 的负充正放：写 +500kW（放电），
+        # 回读也必须是 +500kW。符号反了说明 61850 适配层的充放方向又错了。
+        check("有功遥测 30061 (kW，含符号)", emu.read_s16(REG_TOTAL_ACTIVE) * 0.1,
+              TEST_ACTIVE_KW, 10)
 
         print("== 1. 恒定无功：5007=2(EMS) ⇒ 原生 0，30014=2000（200kVAr 感性）==")
         emu.write_s16(REG_REACTIVE_SET, 2000)
