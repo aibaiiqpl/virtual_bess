@@ -140,6 +140,49 @@ func TestIEC61850ActivePowerControlRejectsOutOfRange(t *testing.T) {
 	}
 }
 
+func TestIEC61850ReactivePowerControlWritesPCSCommand(t *testing.T) {
+	sim := simulator.NewSimulator(singleBatteryConfig(), mustNewServer())
+	svc := &iec61850Server{sim: sim}
+
+	result := svc.ctlReactivePower(nil, nil, &iec61850.MmsValue{Type: iec61850.Float, Value: float32(-12.3)}, false)
+	if result != iec61850.CONTROL_RESULT_OK {
+		t.Fatalf("ctlReactivePower() = %v, want OK", result)
+	}
+	raw := sim.BatteryUnits()[0].PCSBank().ReadU16(simulator.RegPCSReactivePowerCmd)
+	if got := registerInt16(raw); got != -123 {
+		t.Fatalf("PCS reactive power command = %d, want -123", got)
+	}
+}
+
+func TestIEC61850ReactivePowerControlRejectsOutOfRange(t *testing.T) {
+	sim := simulator.NewSimulator(singleBatteryConfig(), mustNewServer())
+	svc := &iec61850Server{sim: sim}
+
+	result := svc.ctlReactivePower(nil, nil, &iec61850.MmsValue{Type: iec61850.Float, Value: float32(4000)}, false)
+	if result != iec61850.CONTROL_RESULT_FAILED {
+		t.Fatalf("ctlReactivePower() = %v, want FAILED", result)
+	}
+	if got := sim.BatteryUnits()[0].PCSBank().ReadU16(simulator.RegPCSReactivePowerCmd); got != 0 {
+		t.Fatalf("PCS reactive power command = %d, want unchanged zero", got)
+	}
+}
+
+func TestIEC61850GooseValuesReadReactiveCommandAndOutput(t *testing.T) {
+	sim := simulator.NewSimulator(singleBatteryConfig(), mustNewServer())
+	battery := sim.BatteryUnits()[0]
+	battery.PCSBank().WriteU16(simulator.RegPCSReactivePowerCmd, 0xFF85)
+	battery.PCSBank().WriteU16(simulator.RegPCSTotalReactPW, 456)
+	svc := &iec61850Server{sim: sim}
+
+	values := svc.gooseValues(battery, 0)
+	if values.reactSetpointKVAr != float32(-12.3) {
+		t.Fatalf("reactive setpoint = %v, want -12.3", values.reactSetpointKVAr)
+	}
+	if values.reactiveKVAr != float32(45.6) {
+		t.Fatalf("reactive output = %v, want 45.6", values.reactiveKVAr)
+	}
+}
+
 func TestIEC61850PCSCommandRejectsUnknownCommand(t *testing.T) {
 	sim := simulator.NewSimulator(singleBatteryConfig(), mustNewServer())
 	svc := &iec61850Server{sim: sim}

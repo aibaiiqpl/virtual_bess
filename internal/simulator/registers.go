@@ -22,15 +22,16 @@ const (
 
 // PCS control registers (writable)
 const (
-	RegPCSGridMode      = 30000 // 0-grid-tied, 1-off-grid
-	RegPCSRunMode       = 30001 // 2-constant power
-	RegPCSFaultReset    = 30002 // 1-reset
-	RegPCSStartup       = 30003 // 1-start
-	RegPCSShutdown      = 30004 // 1-shutdown
-	RegPCSEStop         = 30005 // 1-emergency stop
-	RegPCSRemoteLocal   = 30006 // 0-local, 1-remote
-	RegPCSPowerCmdAlias = 3010  // S16, 0.1kW, alias of RegPCSPowerCmd（真机约定：负充正放）
-	RegPCSPowerCmd      = 30010 // S16, 0.1kW, negative=charge, positive=discharge（对齐真机 IES1000/IES900）
+	RegPCSGridMode         = 30000 // 0-grid-tied, 1-off-grid
+	RegPCSRunMode          = 30001 // 2-constant power
+	RegPCSFaultReset       = 30002 // 1-reset
+	RegPCSStartup          = 30003 // 1-start
+	RegPCSShutdown         = 30004 // 1-shutdown
+	RegPCSEStop            = 30005 // 1-emergency stop
+	RegPCSRemoteLocal      = 30006 // 0-local, 1-remote
+	RegPCSPowerCmdAlias    = 3010  // S16, 0.1kW, alias of RegPCSPowerCmd（真机约定：负充正放）
+	RegPCSPowerCmd         = 30010 // S16, 0.1kW, negative=charge, positive=discharge（对齐真机 IES1000/IES900）
+	RegPCSReactivePowerCmd = 30014 // S16, 0.1kVAr, positive=inductive, negative=capacitive
 )
 
 // PV control registers (writable)
