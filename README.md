@@ -227,7 +227,7 @@ MMS 通过不同 TCP 端口区分端点，例如 `:102`、`:1102`。GOOSE 是二
 
 | 控制对象 | 类型 | 含义 |
 |----------|------|------|
-| `TEMPLATECTRL/setGGIO1.APCS1` | APC | 有功功率设定，kW，负充正放 |
+| `TEMPLATECTRL/setGGIO1.APCS1` | APC | 有功功率设定，kW，**充电为正**（见下方符号约定）|
 | `TEMPLATECTRL/setGGIO1.APCS2` | APC | 无功功率设定，kVAr，正感性/负容性 |
 | `TEMPLATECTRL/setGGIO1.APCS6` | APC | 恒定功率因数设定值，-1~1，正感性/负容性 |
 | `TEMPLATECTRL/setGGIO1.APCS9` | APC | PCS 控制命令：0 关机，1 开机，2 复位，3 待机 |
@@ -236,6 +236,17 @@ MMS 通过不同 TCP 端口区分端点，例如 `:102`、`:1102`。GOOSE 是二
 | `TEMPLATECTRL/ctlGAPC1.SPCSO2` | SPC | PCS 开关机：true 开机，false 关机 |
 | `TEMPLATECTRL/ctlGAPC1.SPCSO5` | SPC | 故障复位：true 复位 |
 | `TEMPLATECTRL/ctlGAPC1.SPCSO6` | SPC | 待机：true 进入待机 |
+
+#### 有功符号约定
+
+**61850 侧（APCS1 设定、AnIn7 / GOOSE AnIn4 遥测）统一是「充电为正」**，与 Modbus 命令
+寄存器 30010 的「负充正放」相反，换算集中在 61850 适配层（`activeKWToCommandRaw` /
+`commandRawToActiveKW`），进出各取反一次。
+
+这不是随意选的：emu 的设备级点表给总有功 30061、直流电流 30078、直流功率 30079 都配了
+北向系数 `-0.1`（Latvijas-20 现场带载实测确认），说明真机 61850 遥测就是充电为正；
+设定点必须跟遥测同号，否则会出现「二级 EMS 下发放电、PCS 实际充电、北向回读还是反号」。
+无功不受影响：61850 与 Modbus 都是正感性 / 负容性，点表也不取反。
 
 ### 遥测（MX 读，已接仿真）
 

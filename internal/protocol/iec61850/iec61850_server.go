@@ -263,8 +263,7 @@ func (s *iec61850Server) ctlActivePower(_ *iec61850.ModelNode, _ *iec61850.Contr
 	if !ok || !fitsPCSCommandRegister(kw) {
 		return iec61850.CONTROL_RESULT_FAILED
 	}
-	raw := int16(math.Round(float64(kw * 10)))
-	if s.writeTargetPCS(simulator.RegPCSPowerCmd, uint16(raw)) != nil {
+	if s.writeTargetPCS(simulator.RegPCSPowerCmd, uint16(activeKWToCommandRaw(kw))) != nil {
 		return iec61850.CONTROL_RESULT_FAILED
 	}
 	return iec61850.CONTROL_RESULT_OK
@@ -421,7 +420,7 @@ func (s *iec61850Server) gooseValues(bu *simulator.BatteryUnit, nowMs int64) iec
 		reactiveKVAr:      float32(registerInt16(pcs.ReadU16(simulator.RegPCSTotalReactPW))) / 10,
 		maxChargeKW:       float32(bms.ReadU16(simulator.RegBMSMaxChargePW)) / 10,
 		maxDischargeKW:    float32(bms.ReadU16(simulator.RegBMSMaxDischargePW)) / 10,
-		activeSetpointKW:  float32(registerInt16(pcs.ReadU16(simulator.RegPCSPowerCmd))) / 10,
+		activeSetpointKW:  commandRawToActiveKW(pcs.ReadU16(simulator.RegPCSPowerCmd)),
 		reactSetpointKVAr: float32(registerInt16(pcs.ReadU16(simulator.RegPCSReactivePowerCmd))) / 10,
 	}
 }
@@ -511,7 +510,7 @@ func (s *iec61850Server) updatePigo(bu *simulator.BatteryUnit, nowMs int64) iec6
 // updateSetReadback 把遥调设定值回填到 setGGIO1 各 APC 的 mxVal（MX 读侧）。
 func (s *iec61850Server) updateSetReadback(bu *simulator.BatteryUnit, nowMs int64) {
 	pcs := bu.PCSBank()
-	activeSet := float32(registerInt16(pcs.ReadU16(simulator.RegPCSPowerCmd))) / 10
+	activeSet := commandRawToActiveKW(pcs.ReadU16(simulator.RegPCSPowerCmd))
 	reactiveSet := float32(registerInt16(pcs.ReadU16(simulator.RegPCSReactivePowerCmd))) / 10
 	s.setMxVal(s.refCtrlSet+".APCS1", activeSet, nowMs)
 	s.setMxVal(s.refCtrlSet+".APCS2", reactiveSet, nowMs)
@@ -746,6 +745,23 @@ func ctlInt(value *iec61850.MmsValue) (int, bool) {
 		return 0, false
 	}
 	return int(rounded), true
+}
+
+// 61850 侧的有功符号约定与 Modbus 命令寄存器相反，两处换算集中在这里。
+//
+// IES900 的 61850 有功点（设定 APCS1 与遥测 AnIn7/GOOSE AnIn4）统一是「充电为正」——
+// 这正是 emu 设备级点表给 30061/30078/30079 配北向系数 -0.1 的原因（Latvijas-20 现场带载
+// 实测确认）。而仿真器的 Modbus 命令寄存器 RegPCSPowerCmd 沿用 EMU-V2.0 的「负充正放」，
+// 所以 61850 适配层进出都要取反；否则会出现「二级 EMS 下发放电、PCS 实际充电」。
+//
+// 遥测方向不需要在这里换算：RegPCSTotalActivePW 存的就是内部「充电为正」的实际功率，
+// 与 61850 约定一致，直出即可。
+func activeKWToCommandRaw(kw float32) int16 {
+	return int16(math.Round(float64(-kw * 10)))
+}
+
+func commandRawToActiveKW(raw uint16) float32 {
+	return float32(-registerInt16(raw)) / 10
 }
 
 func fitsPCSCommandRegister(kw float32) bool {

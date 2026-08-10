@@ -99,20 +99,22 @@ func TestIEC61850MultiEndpointDistinctIEDNamesControlIndependently(t *testing.T)
 		t.Fatalf("client2 Control(pcs02) error = %v", err)
 	}
 
-	waitRegister(t, sim.BatteryUnits()[0].PCSBank(), simulator.RegPCSPowerCmd, 110)
-	waitRegister(t, sim.BatteryUnits()[1].PCSBank(), simulator.RegPCSPowerCmd, 220)
+	// APCS1 是「充电为正」，命令寄存器是「负充正放」，故 +11/+22kW ⇒ -110/-220。
+	waitRegister(t, sim.BatteryUnits()[0].PCSBank(), simulator.RegPCSPowerCmd, int16ToRegister(-110))
+	waitRegister(t, sim.BatteryUnits()[1].PCSBank(), simulator.RegPCSPowerCmd, int16ToRegister(-220))
 }
 
 func TestIEC61850ActivePowerControlWritesPCSCommand(t *testing.T) {
 	sim := simulator.NewSimulator(singleBatteryConfig(), mustNewServer())
 	svc := &iec61850Server{sim: sim}
 
+	// APCS1=+12.3kW 是充电，命令寄存器（负充正放）应为 -123。
 	result := svc.ctlActivePower(nil, nil, &iec61850.MmsValue{Type: iec61850.Float, Value: float32(12.3)}, false)
 	if result != iec61850.CONTROL_RESULT_OK {
 		t.Fatalf("ctlActivePower() = %v, want OK", result)
 	}
-	if got := sim.BatteryUnits()[0].PCSBank().ReadU16(simulator.RegPCSPowerCmd); got != uint16(123) {
-		t.Fatalf("PCS power command = %d, want 123", got)
+	if got := registerInt16(sim.BatteryUnits()[0].PCSBank().ReadU16(simulator.RegPCSPowerCmd)); got != -123 {
+		t.Fatalf("PCS power command = %d, want -123", got)
 	}
 }
 
@@ -127,8 +129,48 @@ func TestIEC61850ActivePowerControlAcceptsAnalogueStruct(t *testing.T) {
 	if result := svc.ctlActivePower(nil, nil, ctlVal, false); result != iec61850.CONTROL_RESULT_OK {
 		t.Fatalf("ctlActivePower(struct) = %v, want OK", result)
 	}
-	if got := registerInt16(sim.BatteryUnits()[0].PCSBank().ReadU16(simulator.RegPCSPowerCmd)); got != -500 {
-		t.Fatalf("PCS power command = %d, want -500", got)
+	if got := registerInt16(sim.BatteryUnits()[0].PCSBank().ReadU16(simulator.RegPCSPowerCmd)); got != 500 {
+		t.Fatalf("PCS power command = %d, want 500", got)
+	}
+}
+
+// TestIEC61850ActivePowerSignMatchesTelemetry 锁住 61850 侧「设定与遥测同号」这个不变量：
+// APCS1 与 AnIn7/GOOSE AnIn4 都是充电为正。此前 APCS1 被当成负充正放直写命令寄存器，
+// 结果二级 EMS 下发放电、仿真器实际充电，北向 30061 回读还是反号。
+func TestIEC61850ActivePowerSignMatchesTelemetry(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		setpointKW float32
+		wantCharge bool
+	}{
+		{name: "positive setpoint charges", setpointKW: 100, wantCharge: true},
+		{name: "negative setpoint discharges", setpointKW: -100, wantCharge: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sim := simulator.NewSimulator(singleBatteryConfig(), mustNewServer())
+			svc := &iec61850Server{sim: sim}
+			bu := sim.BatteryUnits()[0]
+
+			if result := svc.ctlActivePower(nil, nil,
+				&iec61850.MmsValue{Type: iec61850.Float, Value: tc.setpointKW}, false); result != iec61850.CONTROL_RESULT_OK {
+				t.Fatalf("ctlActivePower() = %v, want OK", result)
+			}
+			bu.ProcessPowerCommand()
+			bu.Sync()
+
+			// 内部功率是「正充负放」，与 61850 的充电为正同号。
+			if charging := bu.ActualPowerKW() > 0; charging != tc.wantCharge {
+				t.Fatalf("actual power = %v kW, want charging=%v", bu.ActualPowerKW(), tc.wantCharge)
+			}
+			values := svc.gooseValues(bu, 0)
+			if sameSign := (values.activeKW > 0) == (tc.setpointKW > 0); !sameSign {
+				t.Fatalf("telemetry activeKW = %v, setpoint = %v: signs must match",
+					values.activeKW, tc.setpointKW)
+			}
+			if got := values.activeSetpointKW; got != tc.setpointKW {
+				t.Fatalf("GOOSE active setpoint = %v, want %v", got, tc.setpointKW)
+			}
+		})
 	}
 }
 
@@ -331,7 +373,8 @@ func TestIEC61850ServerMMSReadAndControlSmoke(t *testing.T) {
 		t.Fatalf("Control(APCS1) error = %v", err)
 	}
 	// 服务端控制回调在 MMS server 线程异步落寄存器，与真实设备下发延迟一致，轮询回读。
-	waitRegister(t, sim.BatteryUnits()[0].PCSBank(), simulator.RegPCSPowerCmd, 120)
+	// APCS1=+12kW（充电为正）⇒ 命令寄存器（负充正放）-120。
+	waitRegister(t, sim.BatteryUnits()[0].PCSBank(), simulator.RegPCSPowerCmd, int16ToRegister(-120))
 }
 
 // TestIEC61850ReactiveModeRoundTripThroughMMS 走完整 MMS 链路验证无功模式：
@@ -391,6 +434,11 @@ func TestIEC61850ReactiveModeRoundTripThroughMMS(t *testing.T) {
 	}
 }
 
+// int16ToRegister 把有符号期望值转成寄存器裸值，便于断言负的功率命令。
+func int16ToRegister(v int16) uint16 {
+	return uint16(v)
+}
+
 // waitRegister 轮询等待某寄存器达到期望值，超时则失败；用于覆盖控制下发的异步延迟。
 func waitRegister(t *testing.T, bank *simulator.SlaveBank, register, want uint16) {
 	t.Helper()
@@ -436,8 +484,9 @@ func TestIEC61850MultipleMMSEndpointsControlDifferentPCSUnits(t *testing.T) {
 		t.Fatalf("client2 Control(APCS1) error = %v", err)
 	}
 
-	waitRegister(t, sim.BatteryUnits()[0].PCSBank(), simulator.RegPCSPowerCmd, 110)
-	waitRegister(t, sim.BatteryUnits()[1].PCSBank(), simulator.RegPCSPowerCmd, 220)
+	// APCS1 是「充电为正」，命令寄存器是「负充正放」，故 +11/+22kW ⇒ -110/-220。
+	waitRegister(t, sim.BatteryUnits()[0].PCSBank(), simulator.RegPCSPowerCmd, int16ToRegister(-110))
+	waitRegister(t, sim.BatteryUnits()[1].PCSBank(), simulator.RegPCSPowerCmd, int16ToRegister(-220))
 }
 
 func newIEC61850TestClient(t *testing.T, port int) *iec61850.Client {
