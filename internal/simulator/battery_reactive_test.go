@@ -35,7 +35,7 @@ func TestReactiveModeConstantPFDerivesReactiveFromActive(t *testing.T) {
 			bu := newReadyBattery(t)
 			bu.pcs.WriteU16(RegPCSReactiveModeCmd, ReactiveModeConstPF)
 			bu.pcs.WriteU16(RegPCSPowerFactorCmd, int16ToUint16(tc.pfRaw))
-			// 有功设定 600 = 60kW 放电（真机约定正=放电，内部取反为 -60）。
+			// 有功设定 600 = 放电 60kW（负充正放，内部同号）。
 			bu.pcs.WriteU16(RegPCSPowerCmd, int16ToUint16(600))
 
 			bu.ProcessPowerCommand()

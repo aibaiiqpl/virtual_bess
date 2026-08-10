@@ -25,11 +25,13 @@ type BatteryUnit struct {
 	clusterCount       int
 
 	// 动态状态
-	currentEnergyKWh     float64
-	pcsRunning           bool
-	bmsHVClosed          bool
-	remoteMode           bool
-	gridTied             bool
+	currentEnergyKWh float64
+	pcsRunning       bool
+	bmsHVClosed      bool
+	remoteMode       bool
+	gridTied         bool
+	// actualPowerKW 是交流侧实际有功，「负充正放」：正=放电、负=充电，
+	// 与 RegPCSPowerCmd 和 Modbus 交流有功点表同一套约定。
 	actualPowerKW        float64
 	actualReactiveKVAr   float64
 	lastPowerCmdRaw      uint16
@@ -221,10 +223,10 @@ func (bu *BatteryUnit) ProcessPCSControls() {
 func (bu *BatteryUnit) ProcessPowerCommand() {
 	cmdRaw := bu.syncPowerCommandRegisters()
 	if bu.pcsRunning && bu.remoteMode && bu.bmsHVClosed {
-		// RegPCSPowerCmd 按真机 IES1000/IES900 约定取值：负=充电、正=放电。
-		// 内部 actualPowerKW 用相反的“正充负放”语义驱动电量/电表/状态，
-		// 故此处取反，完成“设备约定 → 内部约定”转换（对齐 emu-go ChargeSign=-1）。
-		cmdPowerKW := -float64(uint16ToInt16(cmdRaw)) * 0.1
+		// 命令寄存器与内部 actualPowerKW 同为「负充正放」，无需换算。
+		// 仿真器全线统一这一套：内部状态、Modbus 交流有功点、61850（真机
+		// IES900 的 61850 有功同样是负充正放）三处都不做符号转换。
+		cmdPowerKW := float64(uint16ToInt16(cmdRaw)) * 0.1
 		if cmdPowerKW > bu.ratedPowerKW {
 			cmdPowerKW = bu.ratedPowerKW
 		}
@@ -272,16 +274,18 @@ func (bu *BatteryUnit) UpdateEnergy(dtSeconds float64) {
 		return
 	}
 	soc := bu.SOC()
-	if bu.actualPowerKW > 0 && soc >= 100.0 {
+	// actualPowerKW 负=充电、正=放电：满电禁充、空电禁放。
+	if bu.actualPowerKW < 0 && soc >= 100.0 {
 		bu.actualPowerKW = 0
 		return
 	}
-	if bu.actualPowerKW < 0 && soc <= 0.0 {
+	if bu.actualPowerKW > 0 && soc <= 0.0 {
 		bu.actualPowerKW = 0
 		return
 	}
 
-	deltaEnergy := bu.actualPowerKW * dtSeconds / 3600.0
+	// 充电（功率为负）应让电量上升，故取反后累加。
+	deltaEnergy := -bu.actualPowerKW * dtSeconds / 3600.0
 	bu.currentEnergyKWh += deltaEnergy
 
 	if deltaEnergy > 0 {

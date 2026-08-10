@@ -268,7 +268,8 @@ func (sim *Simulator) updateMeters(dt float64) {
 	for _, agg := range sim.meters {
 		var pcs, pv, load float64
 		for _, i := range agg.pcsIdx {
-			pcs += sim.batteries[i].ActualPowerKW()
+			// BatteryUnit 是「负充正放」，电表侧要的是「充电为正」（充电即从电网买电），故取反。
+			pcs -= sim.batteries[i].ActualPowerKW()
 		}
 		for _, i := range agg.pvIdx {
 			pv += sim.pvs[i].ActualPowerKW()

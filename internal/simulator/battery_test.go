@@ -12,8 +12,8 @@ func TestPowerCommandAlias3010AppliesLike30010(t *testing.T) {
 	bu.pcs.WriteU16(RegPCSPowerCmdAlias, 500)
 	bu.ProcessPowerCommand()
 
-	// 命令寄存器为真机约定（正=放电），内部 actualPowerKW 取反为 -50（放电）。
-	assertPowerNear(t, bu.actualPowerKW, -50)
+	// 命令与内部功率同为「负充正放」：+500 ⇒ 放电 50kW。
+	assertPowerNear(t, bu.actualPowerKW, 50)
 	assertPowerCommandRegisters(t, bu, 500)
 }
 
@@ -38,8 +38,8 @@ func TestPowerCommand30010StillAppliesAndMirrorsAlias(t *testing.T) {
 	bu.pcs.WriteU16(RegPCSPowerCmd, raw)
 	bu.ProcessPowerCommand()
 
-	// 命令寄存器为真机约定（负=充电），内部 actualPowerKW 取反为 +50（充电）。
-	assertPowerNear(t, bu.actualPowerKW, 50)
+	// 命令与内部功率同为「负充正放」：-500 ⇒ 充电 50kW。
+	assertPowerNear(t, bu.actualPowerKW, -50)
 	assertPowerCommandRegisters(t, bu, raw)
 }
 
@@ -198,7 +198,7 @@ func TestMultipleBatteryUnitsRoutedBySlaveID(t *testing.T) {
 func TestBatteryUnitEnergyAccumulation(t *testing.T) {
 	bu := newReadyBattery(t)
 	bu.currentEnergyKWh = 50.0
-	bu.actualPowerKW = 60.0 // 充电 60 kW
+	bu.actualPowerKW = -60.0 // 负充正放：充电 60 kW
 
 	// 1 小时
 	bu.UpdateEnergy(3600)
@@ -214,7 +214,7 @@ func TestBatteryUnitEnergyAccumulation(t *testing.T) {
 func TestBatteryUnitSOCBoundaryStopsCharging(t *testing.T) {
 	bu := newReadyBattery(t)
 	bu.currentEnergyKWh = bu.ratedCapacityKWh // 100% SOC
-	bu.actualPowerKW = 50
+	bu.actualPowerKW = -50                    // 充电
 
 	bu.UpdateEnergy(60)
 	if bu.actualPowerKW != 0 {

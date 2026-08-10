@@ -59,7 +59,8 @@ func NewMeter(cfg MeterConfig, defaultVoltage float64, bank *SlaveBank) *Meter {
 // Update 根据 load / ΣPCS / ΣPV 重新计算电表功率并累计能量。
 // 公约：gridPowerKW > 0 = 从电网买电；< 0 = 向电网卖电。
 //
-//	PCS actualPowerKW: 正充负放（充电时从电网取电）
+//	totalPCSKW: 已由调用方换成「充电为正」（充电时从电网取电），
+//	            与 BatteryUnit 内部的「负充正放」相反，取反在 updateMeters 完成
 //	PV  actualPowerKW: 永远 >= 0（注入）
 //	Load actualPowerKW: 永远 >= 0（消耗）
 func (m *Meter) Update(dtSeconds, loadPowerKW, totalPCSKW, totalPVKW float64) {

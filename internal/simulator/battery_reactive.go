@@ -43,7 +43,8 @@ func (bu *BatteryUnit) updateReactiveOutput() {
 }
 
 // reactiveTargetKVAr 按无功模式计算无功出力目标（未加抖动，未按视在容量钳制）。
-// activeKW 用内部「正充负放」语义，无功正=感性、负=容性，与 RegPCSReactivePowerCmd 一致。
+// activeKW 用内部「负充正放」语义（只取绝对值参与计算），无功正=感性、负=容性，
+// 与 RegPCSReactivePowerCmd 一致。
 func (bu *BatteryUnit) reactiveTargetKVAr(mode uint16, activeKW float64) float64 {
 	switch mode {
 	case ReactiveModeConstPF:

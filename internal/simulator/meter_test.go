@@ -165,8 +165,9 @@ func TestSimulatorAggregatesMultiplePCSAndPV(t *testing.T) {
 	sim := NewSimulator(&cfg, mustNewServer())
 
 	// 强制各 unit 的功率以便确定性聚合
-	sim.batteries[0].actualPowerKW = 10
-	sim.batteries[1].actualPowerKW = -5
+	// 电池是「负充正放」，电表侧按「充电为正」聚合，故 -10/+5 对应充 10 / 放 5。
+	sim.batteries[0].actualPowerKW = -10
+	sim.batteries[1].actualPowerKW = 5
 	sim.pvs[0].actualPowerKW = 12
 	sim.pvs[1].actualPowerKW = 8
 	sim.loads[0].actualPowerKW = 30

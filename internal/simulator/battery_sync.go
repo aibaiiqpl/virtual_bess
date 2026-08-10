@@ -110,12 +110,13 @@ func (bu *BatteryUnit) syncPCSStatus(powerKW float64) {
 	bu.pcs.WriteU16(RegPCSGridStatus, boolToU16(!bu.gridTied))
 	bu.pcs.WriteU16(RegPCSAlarmStatus, 0)
 
+	// powerKW「负充正放」：负=充电(3)、正=放电(4)。
 	switch {
 	case !bu.pcsRunning:
 		bu.pcs.WriteU16(RegPCSSysStatus, 1)
-	case powerKW > 0:
-		bu.pcs.WriteU16(RegPCSSysStatus, 3)
 	case powerKW < 0:
+		bu.pcs.WriteU16(RegPCSSysStatus, 3)
+	case powerKW > 0:
 		bu.pcs.WriteU16(RegPCSSysStatus, 4)
 	default:
 		bu.pcs.WriteU16(RegPCSSysStatus, 2)
@@ -218,9 +219,9 @@ func (bu *BatteryUnit) syncBMSStatus(soc, powerKW float64) {
 	switch {
 	case !bu.bmsHVClosed:
 		bu.bms.WriteU16(RegBMSSysStatus, 2)
-	case powerKW > 0:
-		bu.bms.WriteU16(RegBMSSysStatus, 3)
 	case powerKW < 0:
+		bu.bms.WriteU16(RegBMSSysStatus, 3)
+	case powerKW > 0:
 		bu.bms.WriteU16(RegBMSSysStatus, 4)
 	default:
 		bu.bms.WriteU16(RegBMSSysStatus, 1)
@@ -288,9 +289,9 @@ func (bu *BatteryUnit) syncClusterRegisters(soc, batVoltage, powerKW float64) {
 	switch {
 	case !bu.bmsHVClosed:
 		clusterStatus = 2
-	case powerKW > 0:
-		clusterStatus = 3
 	case powerKW < 0:
+		clusterStatus = 3
+	case powerKW > 0:
 		clusterStatus = 4
 	case bu.pcsRunning:
 		clusterStatus = 5
