@@ -87,7 +87,7 @@ func NewSimulator(cfg *Config, server *mbserver.Server) *Simulator {
 		sim.banks[buCfg.PCSSlaveID] = pcsBank
 		sim.banks[buCfg.BMSSlaveID] = bmsBank
 
-		bu := NewBatteryUnit(buCfg, cfg.PCS.ACVoltage, pcsBank, bmsBank)
+		bu := NewBatteryUnit(buCfg, cfg.PCS, pcsBank, bmsBank)
 		sim.batteries = append(sim.batteries, bu)
 
 		sim.writeHandlers[buCfg.PCSSlaveID] = bu.OnPCSWrite

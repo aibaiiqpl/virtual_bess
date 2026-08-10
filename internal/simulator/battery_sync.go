@@ -140,11 +140,17 @@ func (bu *BatteryUnit) syncPCSPower(powerKW, reactiveKVAr float64) {
 	if apparentKVA > 0 {
 		powerFactor = math.Abs(powerKW) / apparentKVA
 	}
+	// 功率因数回读带符号：正=感性、负=容性，与 A6 设定值和 30014 无功符号一致，
+	// 否则二级 EMS 下发 PF=-0.9 后回读到 +0.9，无法判断无功方向是否跟随。
+	if reactiveKVAr < 0 {
+		powerFactor = -powerFactor
+	}
 
 	bu.pcs.WriteU16(RegPCSTotalActivePW, int16ToUint16(int16(powerKW*10)))
 	bu.pcs.WriteU16(RegPCSTotalReactPW, int16ToUint16(int16(reactiveKVAr*10)))
 	bu.pcs.WriteU16(RegPCSTotalApparent, uint16(apparentKVA*10))
-	bu.pcs.WriteU16(RegPCSPowerFactor, int16ToUint16(int16(powerFactor*100)))
+	// 功率因数只有 0.01 分辨率，截断会把恒定 PF 模式下的 0.80 变成 0.79，故取四舍五入。
+	bu.pcs.WriteU16(RegPCSPowerFactor, int16ToUint16(int16(math.Round(powerFactor*100))))
 
 	phasePW := int16(powerKW / 3.0 * 10)
 	phaseReactivePW := int16(reactiveKVAr / 3.0 * 10)
@@ -162,10 +168,13 @@ func (bu *BatteryUnit) syncPCSGrid(powerKW, reactiveKVAr float64) {
 	phaseReactiveKVAr := reactiveKVAr / 3.0
 	phaseApparentKVA := math.Hypot(phasePowerKW, phaseReactiveKVAr)
 
+	// 相电压基准取 gridPhaseVoltage（额定或人为强制值），叠加 ±0.5% 采样抖动后上送；
+	// Q-U 控制律用的是未抖动的基准值，见 reactiveFromVoltageDroop 的说明。
+	baseVoltage := bu.gridPhaseVoltage()
 	phaseRegs := []uint16{RegPCSVoltageA, RegPCSVoltageB, RegPCSVoltageC}
 	for _, reg := range phaseRegs {
 		jitter := 1.0 + (rand.Float64()*0.01 - 0.005)
-		bu.pcs.WriteU16(reg, uint16(bu.pcsACVoltage*jitter*10))
+		bu.pcs.WriteU16(reg, uint16(baseVoltage*jitter*10))
 	}
 
 	currentRegs := []uint16{RegPCSCurrentA, RegPCSCurrentB, RegPCSCurrentC}

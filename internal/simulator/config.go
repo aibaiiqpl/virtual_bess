@@ -22,6 +22,18 @@ type PCSConfig struct {
 	// ACVoltage 是 PCS / PV 逆变器 AC 出口的相电压（升压变低压侧），
 	// 与电网电压 (Grid.Voltage, 电表所在侧) 分开配置。
 	ACVoltage float64 `yaml:"ac_voltage"`
+	// ReactiveQU 是 Q-U（无功-电压下垂）模式的整定曲线，只在无功模式=2 时生效。
+	ReactiveQU ReactiveQUConfig `yaml:"reactive_qu"`
+}
+
+// ReactiveQUConfig 描述 Q-U 下垂特性：以额定相电压为基准的标幺电压偏差映射到无功出力。
+// 现场 IES900 的曲线整定项不在 emu 下发的点表里（emu 只下发无功模式 A13），
+// 属于 PCS 内部定值，因此这里用配置模拟，默认取欧洲并网导则常见的 1% 死区 / 5% 满出力。
+type ReactiveQUConfig struct {
+	// Deadband 电压死区（标幺）：|U/Un - 1| 不超过该值时无功出力为 0。
+	Deadband float64 `yaml:"deadband"`
+	// FullResponse 满无功出力对应的电压偏差（标幺），必须大于 Deadband。
+	FullResponse float64 `yaml:"full_response"`
 }
 
 type BatteryUnitConfig struct {
@@ -190,7 +202,10 @@ func DefaultConfig() Config {
 		Modbus:   ModbusConfig{Address: ":502"},
 		IEC61850: IEC61850Config{Address: ":102"},
 		Grid:     GridConfig{Voltage: 220},
-		PCS:      PCSConfig{ACVoltage: 400},
+		PCS: PCSConfig{
+			ACVoltage:  400,
+			ReactiveQU: ReactiveQUConfig{Deadband: defaultQUDeadbandPU, FullResponse: defaultQUFullResponsePU},
+		},
 		BatteryUnits: []BatteryUnitConfig{{
 			PCSSlaveID:         1,
 			BMSSlaveID:         11,
@@ -267,6 +282,12 @@ func (c *Config) applyDefaults() {
 	}
 	if c.PCS.ACVoltage == 0 {
 		c.PCS.ACVoltage = 400
+	}
+	if c.PCS.ReactiveQU.Deadband <= 0 {
+		c.PCS.ReactiveQU.Deadband = defaultQUDeadbandPU
+	}
+	if c.PCS.ReactiveQU.FullResponse <= c.PCS.ReactiveQU.Deadband {
+		c.PCS.ReactiveQU.FullResponse = c.PCS.ReactiveQU.Deadband + defaultQUFullResponsePU - defaultQUDeadbandPU
 	}
 	if c.State.Interval <= 0 {
 		c.State.Interval = 15

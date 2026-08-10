@@ -39,6 +39,12 @@ iec61850:
 grid:
   voltage: 220
 
+pcs:
+  ac_voltage: 400        # PCS 交流出口相电压，Q-U 模式的电压基准
+  reactive_qu:           # Q-U 下垂曲线（标幺，相对 ac_voltage），仅无功模式=2 时生效
+    deadband: 0.01       # 电压死区，偏差在此范围内无功出力为 0
+    full_response: 0.05  # 满无功出力对应的电压偏差，必须大于 deadband
+
 battery_units:
   - pcs_slave_id: 1
     bms_slave_id: 11
@@ -223,8 +229,10 @@ MMS 通过不同 TCP 端口区分端点，例如 `:102`、`:1102`。GOOSE 是二
 |----------|------|------|
 | `TEMPLATECTRL/setGGIO1.APCS1` | APC | 有功功率设定，kW，负充正放 |
 | `TEMPLATECTRL/setGGIO1.APCS2` | APC | 无功功率设定，kVAr，正感性/负容性 |
+| `TEMPLATECTRL/setGGIO1.APCS6` | APC | 恒定功率因数设定值，-1~1，正感性/负容性 |
 | `TEMPLATECTRL/setGGIO1.APCS9` | APC | PCS 控制命令：0 关机，1 开机，2 复位，3 待机 |
 | `TEMPLATECTRL/setGGIO1.APCS10` | APC | PCS 运行模式：0 并网，1 离网 |
+| `TEMPLATECTRL/setGGIO1.APCS13` | APC | 无功功率设定模式：0 恒定无功，1 恒定功率因数，2 Q-U（IES900 原生码） |
 | `TEMPLATECTRL/ctlGAPC1.SPCSO2` | SPC | PCS 开关机：true 开机，false 关机 |
 | `TEMPLATECTRL/ctlGAPC1.SPCSO5` | SPC | 故障复位：true 复位 |
 | `TEMPLATECTRL/ctlGAPC1.SPCSO6` | SPC | 待机：true 进入待机 |
@@ -267,7 +275,27 @@ GOOSE `dsGOOSE1` 发布 `TEMPLATEPIGO/measGGIO1.AnIn1`-`AnIn9`（额定功率、
 | 30005 | 远程急停       | U16  | 1-急停                       |
 | 30006 | 远程/就地设置   | U16  | 0-就地 1-远程，默认 1         |
 | 30010/3010 | 充放电功率指令 | S16  | 0.1kW，负充正放（两个寄存器互为别名） |
-| 30014 | 无功功率指令 | S16 | 0.1kVAr，正感性/负容性 |
+| 30014 | 无功功率指令 | S16 | 0.1kVAr，正感性/负容性，仅恒定无功模式生效 |
+| 30015 | 无功设定模式 | U16 | 0-恒定无功 1-恒定功率因数 2-Q-U（IES900 A13 原生码） |
+| 30016 | 功率因数设定 | S16 | 0.001，正感性/负容性，仅恒定功率因数模式生效；0 视为 1.0 |
+| 30020 | 并网点相电压强制值 | U16 | 0.1V，**仿真专用**，真机无此寄存器；0 表示按额定电压模拟 |
+
+#### 无功控制模式
+
+三种模式共用同一个无功出力通道，切模式后旧模式的设定值不再参与计算：
+
+- **恒定无功（0）**：出力直接跟随 30014，带 ±0.5% 跟踪抖动。
+- **恒定功率因数（1）**：`Q = |P| * tan(acos|PF|)`，符号跟随 PF 符号；有功为 0 时无功为 0。
+  出力由当前有功推导，不再叠加独立抖动，保证 30060 回读的功率因数与设定值一致。
+- **Q-U（2）**：按并网点电压偏差下垂，过压吸收无功（感性），欠压发出无功（容性）。
+  曲线由 `pcs.reactive_qu` 配置：`deadband` 死区、`full_response` 满出力偏差，
+  均为相对额定相电压的标幺值，默认 1% / 5%。曲线整定值不在 emu 下发的点表里，属于 PCS 内部定值。
+
+三种模式的出力都按视在容量做「有功优先」钳制：`|Q| <= sqrt(S额定² - P²)`，
+`S额定` 取 `rated_power_kw`。
+
+Q-U 模式在联调时需要人为制造电压偏差，否则相电压贴着额定值落在死区内、出力恒为 0。
+写 30020 可强制并网点相电压，例如额定 400V 时写 `4120`（412.0V，+3%）即可看到约 50% 额定无功出力。
 
 ### PCS 状态（FC 03，PCS slave）
 

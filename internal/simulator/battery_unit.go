@@ -20,6 +20,8 @@ type BatteryUnit struct {
 	soh                float64
 	batteryVoltageFull float64
 	pcsACVoltage       float64
+	quDeadband         float64
+	quFullResponse     float64
 	clusterCount       int
 
 	// 动态状态
@@ -43,7 +45,8 @@ type BatteryUnit struct {
 }
 
 // NewBatteryUnit 构造一套电池单元，并初始化两个 slave bank 的默认寄存器值。
-func NewBatteryUnit(cfg BatteryUnitConfig, pcsACVoltage float64, pcs, bms *SlaveBank) *BatteryUnit {
+// pcsCfg 提供 PCS 级（而非单元级）参数：AC 出口相电压和 Q-U 下垂曲线。
+func NewBatteryUnit(cfg BatteryUnitConfig, pcsCfg PCSConfig, pcs, bms *SlaveBank) *BatteryUnit {
 	bu := &BatteryUnit{
 		pcs:                pcs,
 		bms:                bms,
@@ -51,13 +54,21 @@ func NewBatteryUnit(cfg BatteryUnitConfig, pcsACVoltage float64, pcs, bms *Slave
 		ratedPowerKW:       cfg.RatedPowerKW,
 		soh:                cfg.SOH,
 		batteryVoltageFull: cfg.BatteryVoltageFull,
-		pcsACVoltage:       pcsACVoltage,
+		pcsACVoltage:       pcsCfg.ACVoltage,
+		quDeadband:         pcsCfg.ReactiveQU.Deadband,
+		quFullResponse:     pcsCfg.ReactiveQU.FullResponse,
 		clusterCount:       cfg.ClusterCount,
 		currentEnergyKWh:   cfg.RatedCapacityKWh * cfg.InitialSOC / 100.0,
 		remoteMode:         true,
 		gridTied:           true,
 		bmsHVClosed:        true,
 		pcsRunning:         true,
+	}
+	// 直接用 Config 结构体构造（不走 LoadConfig 的 applyDefaults）时曲线可能为空，
+	// 这里兜底到默认曲线，避免 Q-U 计算出现除零。
+	if bu.quDeadband <= 0 || bu.quFullResponse <= bu.quDeadband {
+		bu.quDeadband = defaultQUDeadbandPU
+		bu.quFullResponse = defaultQUFullResponsePU
 	}
 
 	// 默认控制寄存器值
@@ -224,15 +235,9 @@ func (bu *BatteryUnit) ProcessPowerCommand() {
 		jitter := 1.0 + (rand.Float64()*0.01 - 0.005)
 		bu.actualPowerKW = cmdPowerKW * jitter
 
-		reactiveKVAr := float64(uint16ToInt16(bu.pcs.ReadU16(RegPCSReactivePowerCmd))) * 0.1
-		if reactiveKVAr > bu.ratedPowerKW {
-			reactiveKVAr = bu.ratedPowerKW
-		}
-		if reactiveKVAr < -bu.ratedPowerKW {
-			reactiveKVAr = -bu.ratedPowerKW
-		}
-		reactiveJitter := 1.0 + (rand.Float64()*0.01 - 0.005)
-		bu.actualReactiveKVAr = reactiveKVAr * reactiveJitter
+		// 无功出力由当前无功模式决定（恒定无功 / 恒定 PF / Q-U），
+		// 必须在 actualPowerKW 定稿之后算，见 updateReactiveOutput。
+		bu.updateReactiveOutput()
 	} else if !bu.remoteMode {
 		// 就地模式：保持当前功率不变
 	} else {

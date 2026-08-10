@@ -240,8 +240,10 @@ func (s *iec61850Server) installControlHandlers() error {
 	}{
 		{s.refCtrlSet + ".APCS1", s.ctlActivePower},   // 有功功率设定
 		{s.refCtrlSet + ".APCS2", s.ctlReactivePower}, // 无功功率设定
+		{s.refCtrlSet + ".APCS6", s.ctlPowerFactor},   // 恒定功率因数设定值
 		{s.refCtrlSet + ".APCS9", s.ctlPCSCommand},    // PCS 控制命令 0关1开2复位3待机
 		{s.refCtrlSet + ".APCS10", s.ctlRunMode},      // PCS 运行模式 0并网1离网
+		{s.refCtrlSet + ".APCS13", s.ctlReactiveMode}, // 无功功率设定模式 0恒定无功1恒定PF2Q-U
 		{s.refCtrlGapc + ".SPCSO2", s.ctlStartStop},   // PCS 开关机
 		{s.refCtrlGapc + ".SPCSO5", s.ctlFaultReset},  // 故障复位
 		{s.refCtrlGapc + ".SPCSO6", s.ctlStandby},     // 待机命令
@@ -275,6 +277,34 @@ func (s *iec61850Server) ctlReactivePower(_ *iec61850.ModelNode, _ *iec61850.Con
 	}
 	raw := int16(math.Round(float64(kvar * 10)))
 	if s.writeTargetPCS(simulator.RegPCSReactivePowerCmd, uint16(raw)) != nil {
+		return iec61850.CONTROL_RESULT_FAILED
+	}
+	return iec61850.CONTROL_RESULT_OK
+}
+
+// ctlPowerFactor 处理 A6「恒定功率因数设定值」：只在无功模式=恒定 PF 时参与出力计算，
+// 但任何时候都接受并保存设定值——真机允许先整定 PF 再切模式。
+func (s *iec61850Server) ctlPowerFactor(_ *iec61850.ModelNode, _ *iec61850.ControlAction, v *iec61850.MmsValue, _ bool) iec61850.ControlHandlerResult {
+	pf, ok := ctlFloat(v)
+	if !ok || pf < -1 || pf > 1 {
+		return iec61850.CONTROL_RESULT_FAILED
+	}
+	raw := int16(math.Round(float64(pf) * 1000))
+	if s.writeTargetPCS(simulator.RegPCSPowerFactorCmd, uint16(raw)) != nil {
+		return iec61850.CONTROL_RESULT_FAILED
+	}
+	return iec61850.CONTROL_RESULT_OK
+}
+
+// ctlReactiveMode 处理 A13「无功功率设定模式」，取值为 IES900 原生码 0~2；
+// 二级 EMS 的 1/2/4 编码由 emu 设备级点表的 dzPoint 换码后才到这里，越界一律拒绝，
+// 避免仿真器接受真机根本不支持的模式而掩盖点表换码错误。
+func (s *iec61850Server) ctlReactiveMode(_ *iec61850.ModelNode, _ *iec61850.ControlAction, v *iec61850.MmsValue, _ bool) iec61850.ControlHandlerResult {
+	mode, ok := ctlInt(v)
+	if !ok || mode < int(simulator.ReactiveModeConstQ) || mode > int(simulator.ReactiveModeQU) {
+		return iec61850.CONTROL_RESULT_FAILED
+	}
+	if s.writeTargetPCS(simulator.RegPCSReactiveModeCmd, uint16(mode)) != nil {
 		return iec61850.CONTROL_RESULT_FAILED
 	}
 	return iec61850.CONTROL_RESULT_OK
@@ -485,7 +515,11 @@ func (s *iec61850Server) updateSetReadback(bu *simulator.BatteryUnit, nowMs int6
 	reactiveSet := float32(registerInt16(pcs.ReadU16(simulator.RegPCSReactivePowerCmd))) / 10
 	s.setMxVal(s.refCtrlSet+".APCS1", activeSet, nowMs)
 	s.setMxVal(s.refCtrlSet+".APCS2", reactiveSet, nowMs)
+	s.setMxVal(s.refCtrlSet+".APCS6", float32(registerInt16(pcs.ReadU16(simulator.RegPCSPowerFactorCmd)))/1000, nowMs)
 	s.setMxVal(s.refCtrlSet+".APCS10", float32(pcs.ReadU16(simulator.RegPCSGridMode)), nowMs)
+	// A13 回读是 emu 设备级点表 statusPoint 的源点（北向 5137 无功模式回读），
+	// 必须以 IES900 原生码回显，换码回二级 EMS 枚举由 emu 侧完成。
+	s.setMxVal(s.refCtrlSet+".APCS13", float32(pcs.ReadU16(simulator.RegPCSReactiveModeCmd)), nowMs)
 }
 
 func (s *iec61850Server) configureGOOSE(cfg simulator.IEC61850GOOSEConfig) error {

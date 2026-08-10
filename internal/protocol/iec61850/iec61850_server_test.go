@@ -26,6 +26,11 @@ func TestIEC61850ModelContainsCoreCIDReferences(t *testing.T) {
 		"TEMPLATECTRL/setGGIO1.APCS1.Oper.ctlVal.f",
 		"TEMPLATECTRL/setGGIO1.APCS1.mxVal.f",
 		"TEMPLATECTRL/setGGIO1.APCS2.Oper.ctlVal.f",
+		"TEMPLATECTRL/setGGIO1.APCS6.Oper.ctlVal.f",
+		"TEMPLATECTRL/setGGIO1.APCS6.mxVal.f",
+		"TEMPLATECTRL/setGGIO1.APCS13.Oper.ctlVal.f",
+		// 北向 5137「无功模式回读」的源点，emu 的 statusPoint 直接挂在这里。
+		"TEMPLATECTRL/setGGIO1.APCS13.mxVal.f",
 		"TEMPLATECTRL/setGGIO1.APCS9.Oper.ctlVal.f",
 		"TEMPLATECTRL/setGGIO1.APCS10.Oper.ctlVal.f",
 		"TEMPLATECTRL/ctlGAPC1.SPCSO2.Oper.ctlVal",
@@ -167,6 +172,70 @@ func TestIEC61850ReactivePowerControlRejectsOutOfRange(t *testing.T) {
 	}
 }
 
+// A6「恒定功率因数设定值」：浮点 PF 按 0.001 标度落到仿真寄存器。
+func TestIEC61850PowerFactorControlWritesPCSCommand(t *testing.T) {
+	sim := simulator.NewSimulator(singleBatteryConfig(), mustNewServer())
+	svc := &iec61850Server{sim: sim}
+
+	result := svc.ctlPowerFactor(nil, nil, &iec61850.MmsValue{Type: iec61850.Float, Value: float32(-0.85)}, false)
+	if result != iec61850.CONTROL_RESULT_OK {
+		t.Fatalf("ctlPowerFactor() = %v, want OK", result)
+	}
+	raw := sim.BatteryUnits()[0].PCSBank().ReadU16(simulator.RegPCSPowerFactorCmd)
+	if got := registerInt16(raw); got != -850 {
+		t.Fatalf("PCS power factor command = %d, want -850", got)
+	}
+}
+
+// |PF| > 1 无物理意义，必须拒绝而不是截断，否则点表标度写错时不会暴露。
+func TestIEC61850PowerFactorControlRejectsOutOfRange(t *testing.T) {
+	sim := simulator.NewSimulator(singleBatteryConfig(), mustNewServer())
+	svc := &iec61850Server{sim: sim}
+
+	result := svc.ctlPowerFactor(nil, nil, &iec61850.MmsValue{Type: iec61850.Float, Value: float32(1.2)}, false)
+	if result != iec61850.CONTROL_RESULT_FAILED {
+		t.Fatalf("ctlPowerFactor() = %v, want FAILED", result)
+	}
+	if got := sim.BatteryUnits()[0].PCSBank().ReadU16(simulator.RegPCSPowerFactorCmd); got != 0 {
+		t.Fatalf("PCS power factor command = %d, want unchanged zero", got)
+	}
+}
+
+// A13「无功功率设定模式」只接受 IES900 原生码 0~2。
+func TestIEC61850ReactiveModeControlWritesNativeCode(t *testing.T) {
+	for _, mode := range []uint16{
+		simulator.ReactiveModeConstQ,
+		simulator.ReactiveModeConstPF,
+		simulator.ReactiveModeQU,
+	} {
+		sim := simulator.NewSimulator(singleBatteryConfig(), mustNewServer())
+		svc := &iec61850Server{sim: sim}
+
+		result := svc.ctlReactiveMode(nil, nil, &iec61850.MmsValue{Type: iec61850.Float, Value: float32(mode)}, false)
+		if result != iec61850.CONTROL_RESULT_OK {
+			t.Fatalf("ctlReactiveMode(%d) = %v, want OK", mode, result)
+		}
+		if got := sim.BatteryUnits()[0].PCSBank().ReadU16(simulator.RegPCSReactiveModeCmd); got != mode {
+			t.Fatalf("PCS reactive mode = %d, want %d", got, mode)
+		}
+	}
+}
+
+// 二级 EMS 的 4(Q-U) 必须经 emu 点表 dzPoint 换码成原生 2 才下发；
+// 未换码直接透传到这里要被拒绝，否则点表换码写错会被仿真器悄悄吞掉。
+func TestIEC61850ReactiveModeControlRejectsEMSEnumeration(t *testing.T) {
+	sim := simulator.NewSimulator(singleBatteryConfig(), mustNewServer())
+	svc := &iec61850Server{sim: sim}
+
+	result := svc.ctlReactiveMode(nil, nil, &iec61850.MmsValue{Type: iec61850.Float, Value: float32(4)}, false)
+	if result != iec61850.CONTROL_RESULT_FAILED {
+		t.Fatalf("ctlReactiveMode(4) = %v, want FAILED", result)
+	}
+	if got := sim.BatteryUnits()[0].PCSBank().ReadU16(simulator.RegPCSReactiveModeCmd); got != 0 {
+		t.Fatalf("PCS reactive mode = %d, want unchanged zero", got)
+	}
+}
+
 func TestIEC61850GooseValuesReadReactiveCommandAndOutput(t *testing.T) {
 	sim := simulator.NewSimulator(singleBatteryConfig(), mustNewServer())
 	battery := sim.BatteryUnits()[0]
@@ -263,6 +332,63 @@ func TestIEC61850ServerMMSReadAndControlSmoke(t *testing.T) {
 	}
 	// 服务端控制回调在 MMS server 线程异步落寄存器，与真实设备下发延迟一致，轮询回读。
 	waitRegister(t, sim.BatteryUnits()[0].PCSBank(), simulator.RegPCSPowerCmd, 120)
+}
+
+// TestIEC61850ReactiveModeRoundTripThroughMMS 走完整 MMS 链路验证无功模式：
+// Operate 下发 A13 原生码 → 落到仿真寄存器 → Sync 后从 mxVal.f 回读。
+// mxVal.f 正是 emu 设备级点表里北向 5137「无功模式回读」的源点，
+// 回读缺失会让二级 EMS 永远读到 0（模式未知）。
+func TestIEC61850ReactiveModeRoundTripThroughMMS(t *testing.T) {
+	port := freeTCPPort(t)
+	sim := simulator.NewSimulator(singleBatteryConfig(), mustNewServer())
+	svc, err := StartServer(simulator.IEC61850Config{Enabled: true, Address: fmt.Sprintf("127.0.0.1:%d", port)}, sim)
+	if err != nil {
+		t.Fatalf("StartServer() error = %v", err)
+	}
+	defer svc.Close()
+	svc.Sync()
+
+	client, err := iec61850.NewClient(iec61850.Settings{
+		Host:           "127.0.0.1",
+		Port:           port,
+		ConnectTimeout: 1000,
+		RequestTimeout: 1000,
+	})
+	if err != nil {
+		t.Fatalf("NewClient() error = %v", err)
+	}
+	defer client.Close()
+
+	if err := client.ControlByControlModelAPC("TEMPLATECTRL/setGGIO1.APCS13",
+		iec61850.CONTROL_MODEL_DIRECT_NORMAL,
+		iec61850.NewControlObjectParamAPC(float32(simulator.ReactiveModeQU))); err != nil {
+		t.Fatalf("Control(APCS13) error = %v", err)
+	}
+	waitRegister(t, sim.BatteryUnits()[0].PCSBank(), simulator.RegPCSReactiveModeCmd, simulator.ReactiveModeQU)
+
+	if err := client.ControlByControlModelAPC("TEMPLATECTRL/setGGIO1.APCS6",
+		iec61850.CONTROL_MODEL_DIRECT_NORMAL, iec61850.NewControlObjectParamAPC(float32(0.9))); err != nil {
+		t.Fatalf("Control(APCS6) error = %v", err)
+	}
+	waitRegister(t, sim.BatteryUnits()[0].PCSBank(), simulator.RegPCSPowerFactorCmd, 900)
+
+	svc.Sync()
+
+	mode, err := client.ReadFloat("TEMPLATECTRL/setGGIO1.APCS13.mxVal.f", iec61850.MX)
+	if err != nil {
+		t.Fatalf("ReadFloat(APCS13.mxVal.f) error = %v", err)
+	}
+	if mode != float32(simulator.ReactiveModeQU) {
+		t.Fatalf("reactive mode readback = %v, want %v", mode, simulator.ReactiveModeQU)
+	}
+
+	pf, err := client.ReadFloat("TEMPLATECTRL/setGGIO1.APCS6.mxVal.f", iec61850.MX)
+	if err != nil {
+		t.Fatalf("ReadFloat(APCS6.mxVal.f) error = %v", err)
+	}
+	if pf != float32(0.9) {
+		t.Fatalf("power factor readback = %v, want 0.9", pf)
+	}
 }
 
 // waitRegister 轮询等待某寄存器达到期望值，超时则失败；用于覆盖控制下发的异步延迟。
