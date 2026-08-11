@@ -46,6 +46,10 @@ type iec61850Server struct {
 	gooseInterval      time.Duration
 	gooseLastPublish   time.Time
 	gooseTimeAllowedMS uint32
+
+	// 带回差的告警锁存位，见 evaluateAlarms。
+	alarmSOCHighLatched   bool
+	alarmCellVHighLatched bool
 }
 
 type iec61850MultiServer struct {
@@ -471,26 +475,65 @@ func (s *iec61850Server) updateBmsMeas(bu *simulator.BatteryUnit, nowMs int64) {
 	s.setFloat(s.refMeasBms+".AnIn12", float32(bms.ReadU16(simulator.RegBMSSOH))/10, nowMs)
 }
 
-// 告警触发阈值：满充判定与单体过压判定（贴近 cellVoltageFull=3.6V 曲线）。
+// 告警阈值与回差。两个阈值都必须落在满充之上：仿真器每 tick 重新随机单体电压极差
+// （30~80mV，最高电芯偏移 6~64mV），阈值贴着正常工作区会被随机波动反复撞线，
+// 表现为 emu 侧三级故障每隔几秒置位/消除一次，进而把 EMU 系统故障一直拉起来。
+// 单体满充电压是 cellVoltageFull=3.6V，故置位取 3.65V（满充 + 半个极差上限）。
 const (
-	alarmSOCHighPercent = 98.0 // SOC ≥ 98% 视为储能电池电压过高（满充）
-	alarmCellVMaxHighMV = 3550 // 单体最高电压 ≥ 3.55V 视为电池电压过高
+	alarmSOCHighPercent  = 98.0 // SOC ≥ 98% 视为储能电池电压过高（满充）
+	alarmSOCClearPercent = 96.0 // 回落到 96% 以下才消除
+	alarmCellVMaxHighMV  = 3650 // 单体最高电压 ≥ 3.65V 视为电池电压过高
+	alarmCellVMaxClearMV = 3600 // 回落到满充电压以下才消除
 )
 
-// updateAlarms 按当前物理状态置位/消除 PCS IED 的离散告警点（alarmGGIO1.AlmN.stVal）。
+// pcsAlarmState 是本 tick 需要上报的 PCS 离散告警，与 61850 模型无关，便于单独回归。
+type pcsAlarmState struct {
+	dcUnderVolt bool
+	socHigh     bool
+	cellVHigh   bool
+}
+
+// evaluateAlarms 判定各告警是否置位。带回差的两项用 iec61850Server 上的锁存位记状态，
+// 每套 PCS 各有一个 iec61850Server 实例，因此锁存天然是按 PCS 隔离的。
+func (s *iec61850Server) evaluateAlarms(bu *simulator.BatteryUnit) pcsAlarmState {
+	return pcsAlarmState{
+		// 直流欠压由仿真器自己锁存（需故障复位才清），这里不再加回差。
+		dcUnderVolt: bu.PcsDCUnderVoltFault(),
+		socHigh: alarmWithHysteresis(&s.alarmSOCHighLatched,
+			bu.SOC(), alarmSOCHighPercent, alarmSOCClearPercent),
+		cellVHigh: alarmWithHysteresis(&s.alarmCellVHighLatched,
+			float64(bu.BMSBank().ReadU16(simulator.RegBMSCellVMax)),
+			alarmCellVMaxHighMV, alarmCellVMaxClearMV),
+	}
+}
+
+// alarmWithHysteresis 带回差的告警判定：达到 raise 置位，回落到 clear 以下才消除，
+// 两者之间保持原状态，避免测量值在阈值附近抖动时反复上报。
+func alarmWithHysteresis(latched *bool, value, raise, clear float64) bool {
+	if *latched {
+		if value <= clear {
+			*latched = false
+		}
+	} else if value >= raise {
+		*latched = true
+	}
+	return *latched
+}
+
+// updateAlarms 把判定结果写到 PCS IED 的离散告警点（alarmGGIO1.AlmN.stVal）。
 //
 // 这些点是 emu 设备级点表 [fwPoint] 的源点，emu 轮询读到 stVal=1 即生成 FwMsg 上报故障，
-// 读到 0 即视为消除并归档到历史。告警纯由当前状态推导（无锁存）：故障条件消失或现场
-// 复位（PCS/BMS FaultReset 已在 ProcessControls 里清除内部标志）后，下一拍 stVal 回 0。
+// 读到 0 即视为消除并归档到历史。
 //
-// 映射对齐 AWS 现场 PCS-IEC61850-MMS.csv：
+// 映射对齐现场 PCS-IEC61850-MMS.csv：
 //   - Alm12 直流侧全母线软件欠压 ← PCS 空载启动（BMS 高压未闭合）触发的直流欠压故障
 //   - Alm2  储能电池电压过高     ← 满充（SOC 过高）
 //   - Alm4  电池电压过高         ← 单体最高电压过高
 func (s *iec61850Server) updateAlarms(bu *simulator.BatteryUnit, nowMs int64) {
-	s.setBool(s.refAlarmPcs+".Alm12", bu.PcsDCUnderVoltFault(), nowMs)
-	s.setBool(s.refAlarmPcs+".Alm2", bu.SOC() >= alarmSOCHighPercent, nowMs)
-	s.setBool(s.refAlarmPcs+".Alm4", bu.BMSBank().ReadU16(simulator.RegBMSCellVMax) >= alarmCellVMaxHighMV, nowMs)
+	alarms := s.evaluateAlarms(bu)
+	s.setBool(s.refAlarmPcs+".Alm12", alarms.dcUnderVolt, nowMs)
+	s.setBool(s.refAlarmPcs+".Alm2", alarms.socHigh, nowMs)
+	s.setBool(s.refAlarmPcs+".Alm4", alarms.cellVHigh, nowMs)
 }
 
 // updatePigo 填 PIGO/measGGIO1（GOOSE 遥测 9 值），并返回这组值供 GOOSE 发布复用。

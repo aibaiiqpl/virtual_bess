@@ -314,6 +314,105 @@ func TestIEC61850StartStopControlWritesStartup(t *testing.T) {
 	}
 }
 
+// TestIEC61850CellVoltageAlarmIgnoresNormalSpread 单体电压告警不能被正常工作区的随机
+// 极差撞出来：SOC 88.7% 时均值 3.51V，最高电芯随机上浮 6~64mV 可到 3.574V，
+// 旧阈值 3.55V 会让 emu 侧每隔几秒报一次三级故障，把 EMU 系统故障一直拉起来。
+func TestIEC61850CellVoltageAlarmIgnoresNormalSpread(t *testing.T) {
+	sim := simulator.NewSimulator(singleBatteryConfig(), mustNewServer())
+	svc := &iec61850Server{sim: sim}
+	bu := sim.BatteryUnits()[0]
+
+	for _, mv := range []uint16{3510, 3550, 3574, 3600} {
+		bu.BMSBank().WriteU16(simulator.RegBMSCellVMax, mv)
+		if svc.evaluateAlarms(bu).cellVHigh {
+			t.Fatalf("cell voltage %dmV should not raise alarm", mv)
+		}
+	}
+}
+
+// TestIEC61850CellVoltageAlarmHasHysteresis 置位后要回落到满充电压以下才消除，
+// 避免真到满充时在阈值附近反复置位/消除。
+func TestIEC61850CellVoltageAlarmHasHysteresis(t *testing.T) {
+	sim := simulator.NewSimulator(singleBatteryConfig(), mustNewServer())
+	svc := &iec61850Server{sim: sim}
+	bu := sim.BatteryUnits()[0]
+	bms := bu.BMSBank()
+
+	bms.WriteU16(simulator.RegBMSCellVMax, alarmCellVMaxHighMV)
+	if !svc.evaluateAlarms(bu).cellVHigh {
+		t.Fatal("cell voltage at raise threshold should alarm")
+	}
+	// 回差带内（clear < v < raise）保持置位
+	bms.WriteU16(simulator.RegBMSCellVMax, alarmCellVMaxClearMV+10)
+	if !svc.evaluateAlarms(bu).cellVHigh {
+		t.Fatal("alarm must stay latched inside the hysteresis band")
+	}
+	bms.WriteU16(simulator.RegBMSCellVMax, alarmCellVMaxClearMV)
+	if svc.evaluateAlarms(bu).cellVHigh {
+		t.Fatal("alarm must clear at or below the clear threshold")
+	}
+}
+
+// TestAlarmHysteresis 回差判定本身：达到 raise 置位，回落到 clear 以下才消除，
+// 两者之间保持原状态。SOC 与单体电压两个告警共用这套逻辑。
+func TestAlarmHysteresis(t *testing.T) {
+	latched := false
+	for _, tc := range []struct {
+		value float64
+		want  bool
+		desc  string
+	}{
+		{value: 90, want: false, desc: "below raise"},
+		{value: 97.9, want: false, desc: "just below raise"},
+		{value: 98, want: true, desc: "at raise"},
+		{value: 97, want: true, desc: "inside band stays latched"},
+		{value: 96.1, want: true, desc: "just above clear stays latched"},
+		{value: 96, want: false, desc: "at clear"},
+		{value: 97, want: false, desc: "inside band stays cleared"},
+	} {
+		if got := alarmWithHysteresis(&latched, tc.value, 98, 96); got != tc.want {
+			t.Fatalf("%s: value %v -> %v, want %v", tc.desc, tc.value, got, tc.want)
+		}
+	}
+}
+
+// TestIEC61850SOCAlarmUsesFullChargeThreshold SOC 满充告警只在接近满充时触发。
+func TestIEC61850SOCAlarmUsesFullChargeThreshold(t *testing.T) {
+	for _, tc := range []struct {
+		soc  float64
+		want bool
+	}{
+		{soc: 90, want: false},
+		{soc: 97, want: false},
+		{soc: alarmSOCHighPercent, want: true},
+	} {
+		cfg := singleBatteryConfig()
+		cfg.BatteryUnits[0].InitialSOC = tc.soc
+		sim := simulator.NewSimulator(cfg, mustNewServer())
+		svc := &iec61850Server{sim: sim}
+		if got := svc.evaluateAlarms(sim.BatteryUnits()[0]).socHigh; got != tc.want {
+			t.Fatalf("SOC %v%% -> alarm %v, want %v", tc.soc, got, tc.want)
+		}
+	}
+}
+
+// TestIEC61850AlarmLatchIsPerServer 每套 PCS 一个 iec61850Server，锁存位不能串。
+func TestIEC61850AlarmLatchIsPerServer(t *testing.T) {
+	sim := simulator.NewSimulator(twoBatteryConfig(), mustNewServer())
+	svc1 := &iec61850Server{sim: sim}
+	svc2 := &iec61850Server{sim: sim}
+	bu1, bu2 := sim.BatteryUnits()[0], sim.BatteryUnits()[1]
+
+	bu1.BMSBank().WriteU16(simulator.RegBMSCellVMax, alarmCellVMaxHighMV)
+	bu2.BMSBank().WriteU16(simulator.RegBMSCellVMax, alarmCellVMaxClearMV)
+	if !svc1.evaluateAlarms(bu1).cellVHigh {
+		t.Fatal("PCS1 should alarm")
+	}
+	if svc2.evaluateAlarms(bu2).cellVHigh {
+		t.Fatal("PCS2 must not inherit PCS1 latch")
+	}
+}
+
 func TestIEC61850GooseDataSetContainsCIDTelemetryValues(t *testing.T) {
 	values := iec61850TelemetryValues{
 		ratedPowerKW:      2500,
