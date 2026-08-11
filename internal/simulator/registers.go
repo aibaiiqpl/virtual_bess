@@ -22,15 +22,19 @@ const (
 
 // PCS control registers (writable)
 const (
-	RegPCSGridMode         = 30000 // 0-grid-tied, 1-off-grid
-	RegPCSRunMode          = 30001 // 2-constant power
-	RegPCSFaultReset       = 30002 // 1-reset
-	RegPCSStartup          = 30003 // 1-start
-	RegPCSShutdown         = 30004 // 1-shutdown
-	RegPCSEStop            = 30005 // 1-emergency stop
-	RegPCSRemoteLocal      = 30006 // 0-local, 1-remote
-	RegPCSPowerCmdAlias    = 3010  // S16, 0.1kW, alias of RegPCSPowerCmd（真机约定：负充正放）
-	RegPCSPowerCmd         = 30010 // S16, 0.1kW, negative=charge, positive=discharge（对齐真机 IES1000/IES900）
+	RegPCSGridMode    = 30000 // 0-grid-tied, 1-off-grid
+	RegPCSRunMode     = 30001 // 2-constant power
+	RegPCSFaultReset  = 30002 // 1-reset
+	RegPCSStartup     = 30003 // 1-start
+	RegPCSShutdown    = 30004 // 1-shutdown
+	RegPCSEStop       = 30005 // 1-emergency stop
+	RegPCSRemoteLocal = 30006 // 0-local, 1-remote
+	// 注意：本文件的 30010 是「设备侧」寄存器，负充正放，与真机 IES1000/IES900 同向。
+	// emu 北向标准点表 2.0 里同样是 30010，但那边是「正充负放」（emu-rs 按正值取
+	// BMS 最大充电功率钳制可印证），两者由 emu setting.json 的 pcs.ChargeSign=-1 换向。
+	// 地址号相同、方向相反，排查时先确认自己站在哪一侧。
+	RegPCSPowerCmdAlias    = 3010  // S16, 0.1kW, alias of RegPCSPowerCmd
+	RegPCSPowerCmd         = 30010 // S16, 0.1kW, negative=charge, positive=discharge
 	RegPCSReactivePowerCmd = 30014 // S16, 0.1kVAr, positive=inductive, negative=capacitive
 	RegPCSReactiveModeCmd  = 30015 // U16, 无功设定模式，取 IES900 A13 原生码：0-恒定无功 1-恒定功率因数 2-Q-U
 	RegPCSPowerFactorCmd   = 30016 // S16, 0.001, 恒定功率因数设定值，正=感性 负=容性；0 视为 1.0（纯有功）
