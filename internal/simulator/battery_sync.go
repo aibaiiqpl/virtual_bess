@@ -218,13 +218,13 @@ func (bu *BatteryUnit) syncBMSStatus(soc, powerKW float64) {
 
 	switch {
 	case !bu.bmsHVClosed:
-		bu.bms.WriteU16(RegBMSSysStatus, 2)
+		bu.bms.WriteU16(RegBMSSysStatus, BMSStatusStopped)
 	case powerKW < 0:
-		bu.bms.WriteU16(RegBMSSysStatus, 3)
+		bu.bms.WriteU16(RegBMSSysStatus, BMSStatusCharging)
 	case powerKW > 0:
-		bu.bms.WriteU16(RegBMSSysStatus, 4)
+		bu.bms.WriteU16(RegBMSSysStatus, BMSStatusDischarging)
 	default:
-		bu.bms.WriteU16(RegBMSSysStatus, 1)
+		bu.bms.WriteU16(RegBMSSysStatus, BMSStatusStandby)
 	}
 
 	bu.bms.WriteU16(RegBMSChargeForbid, boolToU16(soc >= 100.0))
@@ -288,15 +288,15 @@ func (bu *BatteryUnit) syncClusterRegisters(soc, batVoltage, powerKW float64) {
 	var clusterStatus uint16
 	switch {
 	case !bu.bmsHVClosed:
-		clusterStatus = 2
+		clusterStatus = ClusterStatusStopped
 	case powerKW < 0:
-		clusterStatus = 3
+		clusterStatus = ClusterStatusCharging
 	case powerKW > 0:
-		clusterStatus = 4
+		clusterStatus = ClusterStatusDischarging
 	case bu.pcsRunning:
-		clusterStatus = 5
+		clusterStatus = ClusterStatusRunning
 	default:
-		clusterStatus = 1
+		clusterStatus = ClusterStatusStandby
 	}
 
 	remainCharge := (bu.ratedCapacityKWh - bu.currentEnergyKWh) / float64(n)

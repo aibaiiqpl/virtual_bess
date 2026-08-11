@@ -162,12 +162,22 @@ const (
 	RegBMSCellTSpread = 40135 // U16, 0.1 °C, cell temperature spread (max - min)
 )
 
+// RegBMSSysStatus 取值。南向协议适配层（XN3477 / CAN / IEC61850）按这套枚举转换，
+// 不要在适配层里重复写裸数字。
+const (
+	BMSStatusStarting    = 0
+	BMSStatusStandby     = 1 // 高压闭合、静置
+	BMSStatusStopped     = 2 // 高压断开
+	BMSStatusCharging    = 3
+	BMSStatusDischarging = 4
+)
+
 // Cluster Input Register layout: each cluster occupies a block with stride 1600.
 // Cluster N starts at N*1600, data offsets 1~32 within each block.
 const (
 	IRClusterStride = 1600
 
-	OffClusterStatus          = 1  // 0-offline,1-standby,2-stopped,3-charging,4-discharging,5-running,6-fault
+	OffClusterStatus          = 1  // 取值见 ClusterStatus* 常量
 	OffClusterSOC             = 2  // U16, 0.1 %
 	OffClusterSOH             = 3  // U16, 0.1 %
 	OffClusterRemainCharge    = 4  // U16, 0.1 kWh
@@ -199,6 +209,17 @@ const (
 	OffClusterCellTAvg        = 30 // S16, 0.1 °C, average single-cell temperature
 	OffClusterCellVSpread     = 31 // U16, 0.001 V, cell voltage spread (max - min)
 	OffClusterCellTSpread     = 32 // U16, 0.1 °C, cell temperature spread (max - min)
+)
+
+// OffClusterStatus 取值。比整堆多出「运行」和「故障」两种簇级状态。
+const (
+	ClusterStatusOffline     = 0
+	ClusterStatusStandby     = 1 // 高压闭合、PCS 未运行
+	ClusterStatusStopped     = 2 // 高压断开
+	ClusterStatusCharging    = 3
+	ClusterStatusDischarging = 4
+	ClusterStatusRunning     = 5 // 高压闭合、PCS 运行中但功率为 0
+	ClusterStatusFault       = 6
 )
 
 // Meter status registers (read-only, point of common coupling)

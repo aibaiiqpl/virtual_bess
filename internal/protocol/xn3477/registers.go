@@ -79,6 +79,22 @@ const (
 	xnBCUCellCount           = 512
 )
 
+// 运行状态 0x1031（BAU）/ 0x0019（BCU）枚举。
+const (
+	xnRunNormal             = 0
+	xnRunChargeForbidden    = 1
+	xnRunDischargeForbidden = 2
+	xnRunStandby            = 3 // 协议「待机」，本项目语义为下高压
+	xnRunStopped            = 4
+)
+
+// 充放电状态 0x1032（BAU）/ 0x001D（BCU）枚举。
+const (
+	xnChgDsgRest      = 0
+	xnChgDsgDischarge = 1
+	xnChgDsgCharge    = 2
+)
+
 func (ep *endpoint) sync() {
 	ep.syncBAU()
 	for clusterIndex, bank := range ep.clusters {
@@ -91,7 +107,11 @@ func (ep *endpoint) syncBAU() {
 	dest := ep.bau
 
 	dest.WriteU16(xnBAUFaultFlags, source.ReadU16(simulator.RegBMSFaultStatus))
-	mainStatus, workStatus := xnStatus(source.ReadU16(simulator.RegBMSSysStatus))
+	mainStatus, workStatus := xnStatus(
+		source.ReadU16(simulator.RegBMSSysStatus),
+		source.ReadU16(simulator.RegBMSChargeForbid),
+		source.ReadU16(simulator.RegBMSDischargeForbid),
+	)
 	dest.WriteU16(xnBAUMainStatus, mainStatus)
 	dest.WriteU16(xnBAUWorkStatus, workStatus)
 
@@ -158,8 +178,12 @@ func (ep *endpoint) syncBCU(clusterIndex int, dest *simulator.SlaveBank) {
 	}
 
 	status := read(simulator.OffClusterStatus)
-	mainStatus, workStatus := xnClusterStatus(status)
-	if status == 6 {
+	mainStatus, workStatus := xnClusterStatus(
+		status,
+		source.ReadU16(simulator.RegBMSChargeForbid),
+		source.ReadU16(simulator.RegBMSDischargeForbid),
+	)
+	if status == simulator.ClusterStatusFault {
 		dest.WriteU16(xnBCUFaultFlags, 1)
 	} else {
 		dest.WriteU16(xnBCUFaultFlags, 0)
@@ -214,32 +238,53 @@ func copyHoldingU16(
 	dest.WriteU16(destAddress, source.ReadU16(sourceAddress))
 }
 
-func xnStatus(status uint16) (main, work uint16) {
+// xnStatus 把内部 BMS 系统状态映射到 XN3477 的运行状态 0x1031 + 充放电状态 0x1032。
+//
+// 关键约束：协议里「正常」和「待机」不是同义词。0x1031=0 表示高压已闭合、系统在线，
+// 0x1031=3/4 表示高压未闭合；现场点表也据此把 3、4 都读成「下高压/停机」。所以静置
+// （高压闭合但功率为 0）必须报 0，不能报 3，否则 EMS 侧会一直看到下高压，上高压指令
+// 看起来永远不生效。
+// 禁充/禁放同样挤在 0x1031 这一个枚举里，只在高压闭合时才有意义。
+func xnStatus(status, chargeForbidden, dischargeForbidden uint16) (main, work uint16) {
 	switch status {
-	case 1:
-		return 3, 0
-	case 2:
-		return 4, 0
-	case 3:
-		return 0, 2
-	case 4:
-		return 0, 1
+	case simulator.BMSStatusStandby:
+		return xnOnlineMain(chargeForbidden, dischargeForbidden), xnChgDsgRest
+	case simulator.BMSStatusCharging:
+		return xnOnlineMain(chargeForbidden, dischargeForbidden), xnChgDsgCharge
+	case simulator.BMSStatusDischarging:
+		return xnOnlineMain(chargeForbidden, dischargeForbidden), xnChgDsgDischarge
 	default:
-		return 0, 0
+		// 启动中和停机都视为高压未闭合
+		return xnRunStandby, xnChgDsgRest
 	}
 }
 
-func xnClusterStatus(status uint16) (main, work uint16) {
+// xnClusterStatus 映射簇状态到 BCU 的 0x0019 + 0x001D，枚举与 BAU 侧一致。
+// 仿真器没有簇级禁充禁放，沿用整堆标志，保证簇与堆的上报方向一致。
+func xnClusterStatus(status, chargeForbidden, dischargeForbidden uint16) (main, work uint16) {
 	switch status {
-	case 1:
-		return 3, 0
-	case 2:
-		return 4, 0
-	case 3:
-		return 0, 2
-	case 4:
-		return 0, 1
+	case simulator.ClusterStatusStandby, simulator.ClusterStatusRunning:
+		return xnOnlineMain(chargeForbidden, dischargeForbidden), xnChgDsgRest
+	case simulator.ClusterStatusCharging:
+		return xnOnlineMain(chargeForbidden, dischargeForbidden), xnChgDsgCharge
+	case simulator.ClusterStatusDischarging:
+		return xnOnlineMain(chargeForbidden, dischargeForbidden), xnChgDsgDischarge
+	case simulator.ClusterStatusStopped:
+		return xnRunStandby, xnChgDsgRest
 	default:
-		return 0, 0
+		// 离线和故障簇按停机上报
+		return xnRunStopped, xnChgDsgRest
+	}
+}
+
+// xnOnlineMain 返回高压已闭合时的运行状态：优先上报禁充/禁放，否则为正常。
+func xnOnlineMain(chargeForbidden, dischargeForbidden uint16) uint16 {
+	switch {
+	case chargeForbidden == 1:
+		return xnRunChargeForbidden
+	case dischargeForbidden == 1:
+		return xnRunDischargeForbidden
+	default:
+		return xnRunNormal
 	}
 }
