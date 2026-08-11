@@ -17,9 +17,9 @@ func loadTanPhi() float64 {
 
 // MeterInput 是电表本 tick 的聚合输入，全部为一次侧工程量。
 //
-// 符号约定刻意与 BatteryUnit 内部不同，调用方负责换向：
+// 符号约定刻意与 BatteryUnit 内部不同，两项都由调用方换向，理由见 updateMeters：
 //   - PCSKW 充电为正（充电即从电网买电），而 BatteryUnit 是负充正放
-//   - PCSKVAr 感性为正，与 BatteryUnit 一致（PCS 吸收无功 = 站点从电网吸收无功），不换向
+//   - PCSKVAr 感性为正，与现场关口表口径一致
 type MeterInput struct {
 	LoadKW  float64 // 负载有功，>= 0
 	PCSKW   float64 // PCS 有功，充电为正

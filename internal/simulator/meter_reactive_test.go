@@ -62,16 +62,47 @@ func TestMeterCurrentIncludesReactiveComponent(t *testing.T) {
 }
 
 // TestSimulatorAggregatesPCSReactiveIntoMeter 端到端：改电池单元的无功出力，
-// 关口表无功跟着走；有功取反、无功不取反的换向规则也一并锁住。
+// 关口表无功跟着走。有功与无功在聚合时都要换向，规则一并锁住：
+// 有功「负充正放 → 充电为正」，无功「按现场关口表方向取反」。
 func TestSimulatorAggregatesPCSReactiveIntoMeter(t *testing.T) {
 	sim := newTestSimulator(t)
 	bu := sim.batteries[0]
-	bu.actualPowerKW = 50      // 放电 50kW ⇒ 电表侧应为 -50（卖电）
-	bu.actualReactiveKVAr = 30 // 感性 ⇒ 电表侧同为 +30
+	bu.actualPowerKW = 50      // 放电 50kW ⇒ 电表侧 -50（卖电）
+	bu.actualReactiveKVAr = 30 // ⇒ 电表侧 -30
 
 	sim.updateMeters(0)
 
 	meter := sim.meters[0].meter
 	assertFloatNear(t, meter.gridPowerKW, -50+meter.loadPowerKW-sim.pvs[0].ActualPowerKW())
-	assertFloatNear(t, meter.reactiveKVar, meter.loadPowerKW*loadTanPhi()+30)
+	assertFloatNear(t, meter.reactiveKVar, meter.loadPowerKW*loadTanPhi()-30)
+}
+
+// TestMeterActiveSignIsChargePositive 关口表有功约定：正=充电（买电）、负=放电（卖电）。
+func TestMeterActiveSignIsChargePositive(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		batteryKW float64 // BatteryUnit 内部值，负充正放
+		wantSign  float64
+	}{
+		{name: "charging reads positive", batteryKW: -50, wantSign: 1},
+		{name: "discharging reads negative", batteryKW: 50, wantSign: -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sim := newTestSimulator(t)
+			sim.loads = nil
+			sim.pvs = nil
+			for _, agg := range sim.meters {
+				agg.loadIdx, agg.pvIdx = nil, nil
+			}
+			sim.batteries[0].actualPowerKW = tc.batteryKW
+
+			sim.updateMeters(0)
+
+			got := sim.meters[0].meter.gridPowerKW
+			if math.Signbit(got) != math.Signbit(tc.wantSign) {
+				t.Fatalf("battery %vkW -> meter %vkW, want sign %v", tc.batteryKW, got, tc.wantSign)
+			}
+			assertFloatNear(t, math.Abs(got), 50)
+		})
+	}
 }
