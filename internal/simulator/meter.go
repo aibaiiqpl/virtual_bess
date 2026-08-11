@@ -6,9 +6,26 @@ import (
 )
 
 // loadPowerFactor is the assumed power factor of the facility load (inductive).
-// PV inverter and BESS PCS are assumed to operate at unity PF, so the only source
-// of reactive power at the PCC is the load itself.
+// The PV inverter runs at unity PF, so reactive power at the PCC comes from the
+// load plus whatever the BESS PCS is actually producing.
 const loadPowerFactor = 0.95
+
+// loadTanPhi 负载的 tanφ：按固定功率因数从负载有功推算负载无功（感性，>= 0）。
+func loadTanPhi() float64 {
+	return math.Sqrt(1-loadPowerFactor*loadPowerFactor) / loadPowerFactor
+}
+
+// MeterInput 是电表本 tick 的聚合输入，全部为一次侧工程量。
+//
+// 符号约定刻意与 BatteryUnit 内部不同，调用方负责换向：
+//   - PCSKW 充电为正（充电即从电网买电），而 BatteryUnit 是负充正放
+//   - PCSKVAr 感性为正，与 BatteryUnit 一致（PCS 吸收无功 = 站点从电网吸收无功），不换向
+type MeterInput struct {
+	LoadKW  float64 // 负载有功，>= 0
+	PCSKW   float64 // PCS 有功，充电为正
+	PCSKVAr float64 // PCS 无功，感性为正
+	PVKW    float64 // PV 有功，>= 0
+}
 
 // Meter 表示一台电表。可以是主关口（PCC，聚合全部源）或子电表
 // （只聚合配置中指定的 PCS / PV / 负载子集）。
@@ -21,8 +38,9 @@ type Meter struct {
 	ctRatio     float64 // 电流互感器变比（一次/二次）
 
 	// 当前 tick 输入
-	gridPowerKW float64
-	loadPowerKW float64
+	gridPowerKW  float64
+	loadPowerKW  float64
+	reactiveKVar float64
 
 	// 累计能量
 	forwardKWh float64
@@ -56,16 +74,15 @@ func NewMeter(cfg MeterConfig, defaultVoltage float64, bank *SlaveBank) *Meter {
 	}
 }
 
-// Update 根据 load / ΣPCS / ΣPV 重新计算电表功率并累计能量。
+// Update 根据本 tick 的聚合输入重新计算电表功率并累计能量。
 // 公约：gridPowerKW > 0 = 从电网买电；< 0 = 向电网卖电。
-//
-//	totalPCSKW: 已由调用方换成「充电为正」（充电时从电网取电），
-//	            与 BatteryUnit 内部的「负充正放」相反，取反在 updateMeters 完成
-//	PV  actualPowerKW: 永远 >= 0（注入）
-//	Load actualPowerKW: 永远 >= 0（消耗）
-func (m *Meter) Update(dtSeconds, loadPowerKW, totalPCSKW, totalPVKW float64) {
-	m.loadPowerKW = loadPowerKW
-	m.gridPowerKW = loadPowerKW + totalPCSKW - totalPVKW
+// 无功同理：> 0 = 从电网吸收无功（感性），< 0 = 向电网发出无功（容性）。
+func (m *Meter) Update(dtSeconds float64, in MeterInput) {
+	m.loadPowerKW = in.LoadKW
+	m.gridPowerKW = in.LoadKW + in.PCSKW - in.PVKW
+	// 关口无功 = 负载无功（按固定 tanφ 推算）+ PCS 实际无功；
+	// PV 逆变器按单位功率因数运行，不产生无功。
+	m.reactiveKVar = in.LoadKW*loadTanPhi() + in.PCSKVAr
 
 	if dtSeconds <= 0 {
 		return
@@ -81,16 +98,17 @@ func (m *Meter) Update(dtSeconds, loadPowerKW, totalPCSKW, totalPVKW float64) {
 func (m *Meter) Sync() {
 	gridPowerKW := m.gridPowerKW
 
-	// 无功只来自负载（PV/PCS 在 unity PF）；负载是感性的，Q >= 0
-	tanPhi := math.Sqrt(1-loadPowerFactor*loadPowerFactor) / loadPowerFactor
-	reactiveKVar := m.loadPowerKW * tanPhi
+	reactiveKVar := m.reactiveKVar
+	apparentKVA := math.Hypot(gridPowerKW, reactiveKVar)
 
-	apparentKVA := math.Sqrt(gridPowerKW*gridPowerKW + reactiveKVar*reactiveKVar)
-
-	// PF 幅值 = |P|/S；Q ≥ 0 → PF 符号为正
+	// PF 幅值 = |P|/S，符号跟无功方向：正=感性、负=容性，
+	// 与 PCS 侧 30060 的口径一致，便于二级 EMS 直接比对两端。
 	pfMag := 1.0
 	if apparentKVA > 0 {
 		pfMag = math.Abs(gridPowerKW) / apparentKVA
+	}
+	if reactiveKVar < 0 {
+		pfMag = -pfMag
 	}
 
 	// 二次侧 = 一次侧 / (PT × CT)，与电压/电流约定一致，EMS 端统一 × PT × CT 还原。
@@ -151,8 +169,8 @@ func (m *Meter) Sync() {
 	m.bank.WriteS32(RegMeterApparentPWBHi, phaseAppar1000)
 	m.bank.WriteS32(RegMeterApparentPWCHi, phaseAppar1000)
 
-	// PF (S32, 0.001)；非负
-	pf1000 := int32(pfMag * 1000)
+	// PF (S32, 0.001)，带符号
+	pf1000 := int32(math.Round(pfMag * 1000))
 	m.bank.WriteS32(RegMeterPFTotalHi, pf1000)
 	m.bank.WriteS32(RegMeterPFAHi, pf1000)
 	m.bank.WriteS32(RegMeterPFBHi, pf1000)

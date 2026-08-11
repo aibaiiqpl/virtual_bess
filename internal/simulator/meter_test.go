@@ -22,7 +22,7 @@ func TestMeterGridPowerSign(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newTestMeter(t)
 			m.forwardKWh, m.reverseKWh = 0, 0
-			m.Update(0, tc.load, tc.bess, tc.pv)
+			m.Update(0, MeterInput{LoadKW: tc.load, PCSKW: tc.bess, PVKW: tc.pv})
 			if math.Abs(m.gridPowerKW-tc.want) > 0.001 {
 				t.Errorf("gridPowerKW = %v, want %v", m.gridPowerKW, tc.want)
 			}
@@ -35,7 +35,7 @@ func TestMeterEnergyAccumulation(t *testing.T) {
 	m.forwardKWh, m.reverseKWh = 0, 0
 
 	// 60 kW import for 1 hour → 60 kWh forward
-	m.Update(3600, 60, 0, 0)
+	m.Update(3600, MeterInput{LoadKW: 60, PCSKW: 0, PVKW: 0})
 	if math.Abs(m.forwardKWh-60) > 0.001 {
 		t.Errorf("forward energy after 1h@60kW import = %v, want 60", m.forwardKWh)
 	}
@@ -44,7 +44,7 @@ func TestMeterEnergyAccumulation(t *testing.T) {
 	}
 
 	// 40 kW export for 30 min → 20 kWh reverse
-	m.Update(1800, 0, 0, 40)
+	m.Update(1800, MeterInput{LoadKW: 0, PCSKW: 0, PVKW: 40})
 	if math.Abs(m.reverseKWh-20) > 0.001 {
 		t.Errorf("reverse energy after 30m@40kW export = %v, want 20", m.reverseKWh)
 	}
@@ -66,7 +66,7 @@ func TestMeterPFAlwaysPositive(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newTestMeter(t)
-			m.Update(0, tc.load, tc.bess, tc.pv)
+			m.Update(0, MeterInput{LoadKW: tc.load, PCSKW: tc.bess, PVKW: tc.pv})
 			m.Sync()
 			pf := readS32Bank(m.bank.Holding, RegMeterPFTotalHi)
 			if pf < 0 {
@@ -82,7 +82,7 @@ func TestMeterPFAlwaysPositive(t *testing.T) {
 func TestMeterApparentPowerCorrect(t *testing.T) {
 	// S = √(P² + Q²) where Q = P_load × tan(arccos(0.95))
 	m := newTestMeter(t)
-	m.Update(0, 100, 0, 0)
+	m.Update(0, MeterInput{LoadKW: 100, PCSKW: 0, PVKW: 0})
 	m.Sync()
 
 	apparent := float64(readS32Bank(m.bank.Holding, RegMeterApparentPWTotalHi)) / 1000.0
@@ -97,7 +97,7 @@ func TestMeterApparentPowerCorrect(t *testing.T) {
 func TestMeterCurrentSignFollowsActivePower(t *testing.T) {
 	// Import: current positive
 	m := newTestMeter(t)
-	m.Update(0, 50, 0, 0)
+	m.Update(0, MeterInput{LoadKW: 50, PCSKW: 0, PVKW: 0})
 	m.Sync()
 	iA := readS32Bank(m.bank.Holding, RegMeterCurrentAHi)
 	if iA <= 0 {
@@ -106,7 +106,7 @@ func TestMeterCurrentSignFollowsActivePower(t *testing.T) {
 
 	// Export: current negative
 	m = newTestMeter(t)
-	m.Update(0, 0, 0, 50)
+	m.Update(0, MeterInput{LoadKW: 0, PCSKW: 0, PVKW: 50})
 	m.Sync()
 	iA = readS32Bank(m.bank.Holding, RegMeterCurrentAHi)
 	if iA >= 0 {
@@ -135,7 +135,7 @@ func TestMeterFrequencyJitter(t *testing.T) {
 func TestMeterDtNegativeIgnored(t *testing.T) {
 	m := newTestMeter(t)
 	m.forwardKWh, m.reverseKWh = 0, 0
-	m.Update(-1, 100, 0, 0)
+	m.Update(-1, MeterInput{LoadKW: 100, PCSKW: 0, PVKW: 0})
 	if m.forwardKWh != 0 || m.reverseKWh != 0 {
 		t.Errorf("negative dt should not accumulate: fwd=%v rev=%v", m.forwardKWh, m.reverseKWh)
 	}

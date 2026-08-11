@@ -86,6 +86,9 @@ func NewBatteryUnit(cfg BatteryUnitConfig, pcsCfg PCSConfig, pcs, bms *SlaveBank
 
 func (bu *BatteryUnit) ActualPowerKW() float64 { return bu.actualPowerKW }
 
+// ActualReactiveKVAr 交流侧实际无功，正=感性（吸收）、负=容性（发出）。
+func (bu *BatteryUnit) ActualReactiveKVAr() float64 { return bu.actualReactiveKVAr }
+
 func (bu *BatteryUnit) PCSSlaveID() uint8 { return bu.pcs.SlaveID }
 
 func (bu *BatteryUnit) RatedPowerKW() float64 { return bu.ratedPowerKW }

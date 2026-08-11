@@ -266,10 +266,12 @@ func (sim *Simulator) Tick() {
 
 func (sim *Simulator) updateMeters(dt float64) {
 	for _, agg := range sim.meters {
-		var pcs, pv, load float64
+		var pcs, pcsReactive, pv, load float64
 		for _, i := range agg.pcsIdx {
-			// BatteryUnit 是「负充正放」，电表侧要的是「充电为正」（充电即从电网买电），故取反。
+			// 有功：BatteryUnit 是「负充正放」，电表侧要的是「充电为正」（充电即从电网买电），故取反。
 			pcs -= sim.batteries[i].ActualPowerKW()
+			// 无功：两侧都是「感性为正」，PCS 吸收无功即站点从电网吸收无功，不换向。
+			pcsReactive += sim.batteries[i].ActualReactiveKVAr()
 		}
 		for _, i := range agg.pvIdx {
 			pv += sim.pvs[i].ActualPowerKW()
@@ -277,12 +279,12 @@ func (sim *Simulator) updateMeters(dt float64) {
 		for _, i := range agg.loadIdx {
 			load += sim.loads[i].ActualPowerKW()
 		}
+		in := MeterInput{LoadKW: load, PCSKW: pcs, PCSKVAr: pcsReactive, PVKW: pv}
 		if agg.outflow {
-			// 翻转方向：发电/放电变为 forward
-			agg.meter.Update(dt, -load, -pcs, -pv)
-		} else {
-			agg.meter.Update(dt, load, pcs, pv)
+			// 翻转方向：发电/放电变为 forward，无功一并反向
+			in = MeterInput{LoadKW: -load, PCSKW: -pcs, PCSKVAr: -pcsReactive, PVKW: -pv}
 		}
+		agg.meter.Update(dt, in)
 	}
 }
 

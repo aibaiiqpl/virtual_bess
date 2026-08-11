@@ -18,11 +18,14 @@ Virtual BESS 起源于 EMS 开发过程中的联调和回归测试需求。真�
 - **风冷空调（ac_units）**：独立 slave，按温度设定和回差自动制冷/制热/待机；源寄存器兼容 `AC-P-heidun.csv`。
 - **液冷空调（lc_units）**：独立 slave，模拟进回水温度、压力与压缩机状态；源寄存器兼容 `LC-tongfei.csv`。
 
-电表入网功率公式：
+电表入网功率公式（有功与无功都聚合）：
 ```
-gridPowerKW = loadPowerKW + Σ(PCS.actualPowerKW) − Σ(PV.actualPowerKW)
-正值=买电，负值=卖电
+gridPowerKW  = loadPowerKW + Σ(PCS 充电为正) − Σ(PV.actualPowerKW)   正值=买电，负值=卖电
+reactiveKVar = loadPowerKW × tanφ(0.95) + Σ(PCS.actualReactiveKVAr)  正值=感性，负值=容性
 ```
+PCS 有功在聚合时取反（内部「负充正放」→ 电表「充电为正」），无功两侧同为「感性为正」不取反。
+PV 逆变器按单位功率因数运行，不产生无功。视在功率、功率因数、三相电流都由上面两个量导出，
+功率因数带符号，与 PCS 侧 30060 口径一致。
 
 ## 配置
 

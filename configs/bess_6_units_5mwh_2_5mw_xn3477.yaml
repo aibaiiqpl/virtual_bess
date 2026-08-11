@@ -135,15 +135,18 @@ pv_units: []
 loads: []
 
 meters:
+  # 关口表在 10kV 高压侧，与现场 virtual-meter.yaml 的 high_voltage_v=10000 / pt=100 一致，
+  # 二次侧落在标准的 100V。
   - slave_id: 31
     name: main
     is_main: true
-    voltage: 15000
-    pt_ratio: 150
+    voltage: 10000
+    pt_ratio: 100
+  # PCS 汇总表在低压侧，电压取 pcs.ac_voltage，直接接入不带 PT。
   - slave_id: 36
     name: pcs_all
     pcs_slave_ids: [1, 2, 3, 4, 5, 6]
-    voltage: 800
+    voltage: 720
     pt_ratio: 1
 
 log:
