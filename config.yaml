@@ -1,5 +1,8 @@
 modbus:
   address: ":502"
+  # 非空时额外开一个 RTU over TCP 端口（串口服务器/透传网关模拟），
+  # 与上面的 MBAP 端口共用同一份寄存器区；联调 emu-rs 的 rtu_tcp 端口类型时打开。
+  rtu_over_tcp_address: ""
 
 iec61850:
   enabled: false

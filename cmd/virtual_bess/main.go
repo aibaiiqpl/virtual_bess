@@ -49,6 +49,17 @@ func main() {
 		os.Exit(1)
 	}
 	zaplog.Infof("modbus TCP server listening on %s", cfg.Modbus.Address)
+	// RTU over TCP 端口与 MBAP 端口共用同一个 Server（同一份寄存器区），
+	// 只是帧格式不同；留空即不开。
+	if cfg.Modbus.RTUOverTCPAddress != "" {
+		if err := server.ListenRTUOverTCP(cfg.Modbus.RTUOverTCPAddress); err != nil {
+			zaplog.Errorf("failed to start modbus rtu-over-tcp server on %s: %v",
+				cfg.Modbus.RTUOverTCPAddress, err)
+			server.Close()
+			os.Exit(1)
+		}
+		zaplog.Infof("modbus RTU-over-TCP server listening on %s", cfg.Modbus.RTUOverTCPAddress)
+	}
 
 	sim := simulator.NewSimulator(cfg, server)
 	xn3477Service, err := xn3477sim.StartServer(cfg.XN3477, sim)

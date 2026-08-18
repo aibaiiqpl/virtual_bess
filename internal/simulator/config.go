@@ -113,6 +113,10 @@ type AirConditionerConfig struct {
 
 type ModbusConfig struct {
 	Address string `yaml:"address"`
+	// RTUOverTCPAddress 非空时额外开一个 Modbus RTU over TCP 监听（串口服务器 / 透传
+	// 网关模拟），共用同一份寄存器区，用于联调 emu-rs 的 rtu_tcp 端口类型。
+	// 留空即不开，保持纯 MBAP 行为。
+	RTUOverTCPAddress string `yaml:"rtu_over_tcp_address"`
 }
 
 // CANConfig 描述 CAN 南向模拟（博最 BCM CAN 协议，去复用帧布局）。
