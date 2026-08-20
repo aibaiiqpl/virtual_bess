@@ -12,7 +12,7 @@ import (
 const defaultGridFrequencyHz = 50.0
 
 // gridFrequencyHz 是全站电网标称频率（Hz），由 grid.frequency 配置一次性设定，
-// 供电表 / PCS / PV 各同步点统一写入频率寄存器；与 pvLocation 同为进程级仿真参数。
+// 供电表 / PCS / PV 各同步点统一写入频率寄存器；与 siteLocation 同为进程级仿真参数。
 var gridFrequencyHz = defaultGridFrequencyHz
 
 // SetGridFrequency 设置全站电网频率；非正值忽略，保持默认 50Hz。
@@ -21,6 +21,9 @@ func SetGridFrequency(hz float64) {
 		gridFrequencyHz = hz
 	}
 }
+
+// GridFrequency 返回当前生效的电网频率，供 details 展示实际值而非配置原值。
+func GridFrequency() float64 { return gridFrequencyHz }
 
 // meterAgg 描述一个电表的聚合源（按 slave_id / load name 预解析为索引）。
 type meterAgg struct {

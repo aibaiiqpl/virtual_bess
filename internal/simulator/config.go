@@ -197,7 +197,8 @@ type Config struct {
 	TemperatureHumid []THConfig  `yaml:"temperature_humidity"`
 	Log              LogConfig   `yaml:"log"`
 	State            StateConfig `yaml:"state"`
-	// Timezone 用于 PV 日照曲线计算，IANA 时区名（如 "Europe/Lisbon"）；空则使用系统本地时区。
+	// Timezone 站点时区，IANA 时区名（如 "Europe/Riga"）；空则使用运行主机的本地时区。
+	// PV 日照曲线、PV 日/月/年电量翻转和负荷曲线都按它换算站点本地时钟。
 	Timezone string `yaml:"timezone"`
 }
 
@@ -344,6 +345,10 @@ func applyAirConditionerDefaults(cfg *AirConditionerConfig) {
 
 // validate 校验 slaveId 唯一且非零，至少一个电池单元、一个电表。
 func (c *Config) validate() error {
+	// 时区非法直接拒绝启动：错误时区会让整条 PV/负荷曲线偏移，事后极难察觉。
+	if _, err := resolveLocation(c.Timezone); err != nil {
+		return err
+	}
 	if len(c.BatteryUnits) == 0 {
 		return fmt.Errorf("at least one battery_unit is required")
 	}

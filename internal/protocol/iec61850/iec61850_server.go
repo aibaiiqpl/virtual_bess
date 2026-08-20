@@ -71,6 +71,9 @@ type iec61850TelemetryValues struct {
 	reactSetpointKVAr float32
 }
 
+// Supported 表示当前二进制是否编译进了 IEC61850 支持（details 子命令据此说明部署变体）。
+const Supported = true
+
 func StartServer(cfg simulator.IEC61850Config, sim *simulator.Simulator) (IEC61850Service, error) {
 	if !cfg.Enabled {
 		return noopIEC61850Service{}, nil

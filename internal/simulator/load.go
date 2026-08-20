@@ -21,10 +21,15 @@ func (l *Load) Name() string { return l.name }
 
 func (l *Load) ActualPowerKW() float64 { return l.actualPowerKW }
 
+// Update 按站点本地时钟推进负荷曲线。
+//
+// 输入 now 可以是任意时区的时刻，内部统一换算到站点时区（siteLocation），
+// 保证仿真主机时区与站点不一致时负荷高峰仍落在站点的白天。
 func (l *Load) Update(now time.Time) {
-	hour := float64(now.Hour()) +
-		float64(now.Minute())/60.0 +
-		float64(now.Second())/3600.0
+	local := now.In(siteLocation)
+	hour := float64(local.Hour()) +
+		float64(local.Minute())/60.0 +
+		float64(local.Second())/3600.0
 
 	base := loadBaseRatio(hour)
 	noise := 1.0 + (rand.Float64()*0.10 - 0.05)

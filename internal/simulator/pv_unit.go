@@ -7,23 +7,6 @@ import (
 
 const pvInverterEfficiency = 0.98
 
-// pvLocation 持有站点时区，用于把时间转换为本地太阳时。
-var pvLocation *time.Location = time.Local
-
-// SetPVTimezone 设置 PV 发电计算使用的时区。
-func SetPVTimezone(tz string) {
-	if tz == "" {
-		pvLocation = time.Local
-		return
-	}
-	loc, err := time.LoadLocation(tz)
-	if err != nil {
-		pvLocation = time.Local
-		return
-	}
-	pvLocation = loc
-}
-
 type pvLimitMode int
 
 const (
@@ -147,7 +130,7 @@ func (pv *PVUnit) UpdateSimulation(now time.Time, dtSeconds, weatherCoeff float6
 }
 
 func (pv *PVUnit) naturalPowerKW(now time.Time, weatherCoeff float64) float64 {
-	local := now.In(pvLocation)
+	local := now.In(siteLocation)
 	hour := float64(local.Hour()) +
 		float64(local.Minute())/60.0 +
 		float64(local.Second())/3600.0 +
@@ -172,9 +155,12 @@ func (pv *PVUnit) activeLimitKW() float64 {
 }
 
 func (pv *PVUnit) resetPeriods(now time.Time) {
-	dayKey := now.Year()*1000 + now.YearDay()
-	monthKey := now.Year()*100 + int(now.Month())
-	yearKey := now.Year()
+	// 日/月/年电量按站点本地日历翻转，避免主机时区与站点不一致时
+	// 日电量在站点白天中途被清零。
+	local := now.In(siteLocation)
+	dayKey := local.Year()*1000 + local.YearDay()
+	monthKey := local.Year()*100 + int(local.Month())
+	yearKey := local.Year()
 
 	if pv.dayKey == 0 {
 		pv.dayKey = dayKey

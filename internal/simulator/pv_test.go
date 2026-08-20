@@ -34,11 +34,7 @@ func TestPVNaturalPowerCurve(t *testing.T) {
 }
 
 func TestPVNaturalPowerUsesConfiguredTimezone(t *testing.T) {
-	oldLocation := pvLocation
-	t.Cleanup(func() {
-		pvLocation = oldLocation
-	})
-	SetPVTimezone("Europe/Lisbon")
+	withSiteTimezone(t, "Europe/Lisbon")
 
 	pv := newTestPV(t)
 

@@ -107,9 +107,23 @@ lc_units:
     name: lc-2
     indoor_temperature: 29
     ambient_temperature: 31
+
+timezone: "Europe/Lisbon"   # 站点时区，IANA 名；留空跟随运行主机本地时区
 ```
 
-启动时校验：所有 slave_id 不能为 0 且不能重复，至少 1 个 battery_unit。
+启动时校验：所有 slave_id 不能为 0 且不能重复，至少 1 个 battery_unit，`timezone` 必须是合法 IANA 时区名。
+
+### 站点时区
+
+`timezone` 是**站点**时区，不是主机时区，仿真机器放在哪个机房都不影响曲线：
+
+- PV 按站点本地 6:00–18:00 的晴空曲线发电；
+- PV 日 / 月 / 年电量在站点本地零点翻转；
+- 负荷曲线按站点本地时钟走早晚高峰和午休低谷。
+
+留空则跟随运行主机本地时区。时区名非法时进程**直接启动失败**，不会静默退回主机时区——
+悄悄用错时区会让整条曲线偏移数小时，现场很难发现。IANA 时区库已编进二进制，目标机没装
+tzdata 也能正常解析。
 
 ### XN3477 BMS
 
@@ -147,9 +161,35 @@ xn3477:
 ## 构建和运行
 
 ```bash
-go build -o virtual_bess ./cmd/virtual_bess
+make                       # 交叉编译全部目标到 build/
+make virtual_bess          # 只编当前平台，产物在仓库根目录
 ./virtual_bess -config config.yaml
 ```
+
+`make` 会把 `git describe` 版本、commit 和构建时间注入二进制，用 `details` 子命令查看
+部署的是哪一版、以及生效的时区和各协议端点（只读，不启动任何监听）：
+
+```bash
+./virtual_bess details -config config.yaml
+```
+
+```text
+build:
+  version:             v0.4.1-20-gabc1234
+  commit:              abc1234
+  build time:          2026-08-20T02:30:00Z
+  go:                  go1.26.4
+  platform:            linux/arm64
+  variant:             iec61850            # simple = 未编译 IEC 61850 支持
+config:
+  file:                config.yaml
+  timezone:            Europe/Lisbon -> Europe/Lisbon, site time 2026-08-20T03:30:00+01:00 (WEST UTC+1)
+  host time:           2026-08-20T10:30:00+08:00
+  modbus tcp:          :502
+  ...
+```
+
+直接 `go build` 出来的二进制没有注入版本，此时 `details` 回落读取 Go 自带的 VCS 戳。
 
 启用 IEC 61850 MMS 服务端时：
 

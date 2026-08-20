@@ -43,6 +43,17 @@ func newTestMeter(t *testing.T) *Meter {
 	return sim.meters[0].meter
 }
 
+// withSiteTimezone 在单个测试内临时切换站点时区，测试结束后恢复，
+// 避免包级 siteLocation 泄漏影响其他用例。
+func withSiteTimezone(t *testing.T, tz string) {
+	t.Helper()
+	old := siteLocation
+	t.Cleanup(func() { siteLocation = old })
+	if err := SetSiteTimezone(tz); err != nil {
+		t.Fatalf("SetSiteTimezone(%q) = %v, want nil", tz, err)
+	}
+}
+
 func localTime(year int, month time.Month, day, hour, minute, second int) time.Time {
 	return time.Date(year, month, day, hour, minute, second, 0, time.Local)
 }
