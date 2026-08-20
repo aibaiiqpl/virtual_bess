@@ -81,7 +81,7 @@ func run(args []string) int {
 
 	info := buildinfo.Get()
 	zaplog.Infof("starting virtual BESS version=%s commit=%s: %d battery_unit(s), %d pv_unit(s), %d meter(s), %d load(s), site timezone %s",
-		info.Version, info.Commit,
+		info.Version, info.GitCommitSha,
 		len(cfg.BatteryUnits), len(cfg.PVUnits), len(cfg.Meters), len(cfg.Loads),
 		simulator.SiteLocation())
 

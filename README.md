@@ -125,6 +125,12 @@ timezone: "Europe/Lisbon"   # 站点时区，IANA 名；留空跟随运行主机
 悄悄用错时区会让整条曲线偏移数小时，现场很难发现。IANA 时区库已编进二进制，目标机没装
 tzdata 也能正常解析。
 
+实际生效的时区可以在启动日志里确认：
+
+```text
+starting virtual BESS version=... : 2 battery_unit(s), 10 pv_unit(s), ..., site timezone Europe/Lisbon
+```
+
 ### XN3477 BMS
 
 XN3477 一套电池包含一个 BAU 和多个 BCU，BAU/BCU 共用 TCP 端点、按 slaveId 区分。多套电池会重复使用 BAU slave 1 和 BCU slave 2–13，因此必须配置不同 TCP 端口：
@@ -166,30 +172,27 @@ make virtual_bess          # 只编当前平台，产物在仓库根目录
 ./virtual_bess -config config.yaml
 ```
 
-`make` 会把 `git describe` 版本、commit 和构建时间注入二进制，用 `details` 子命令查看
-部署的是哪一版、以及生效的时区和各协议端点（只读，不启动任何监听）：
+`make` 会把版本、构建时间和 git 信息注入二进制，`details` 子命令用于确认现场部署的是
+哪一次构建（字段与 emu-go 的 `details` 一致，不接受参数、不读配置）：
 
 ```bash
-./virtual_bess details -config config.yaml
+./virtual_bess details
 ```
 
 ```text
-build:
-  version:             v0.4.1-20-gabc1234
-  commit:              abc1234
-  build time:          2026-08-20T02:30:00Z
-  go:                  go1.26.4
-  platform:            linux/arm64
-  variant:             iec61850            # simple = 未编译 IEC 61850 支持
-config:
-  file:                config.yaml
-  timezone:            Europe/Lisbon -> Europe/Lisbon, site time 2026-08-20T03:30:00+01:00 (WEST UTC+1)
-  host time:           2026-08-20T10:30:00+08:00
-  modbus tcp:          :502
-  ...
+Version:	v0.4.1-21-g712fda7
+BuildTime:	2026-08-20T02:21:42Z
+GitCommitSha:	712fda7c212af2a84856623df602a74189c29316
+GitBranch:	latvia
+GitAuthor:	frank@aiwatt.net
+BuildBy:	Makefile
+GoVersion:	go1.26.4
+Platform:	linux/arm64
+Variant:	iec61850
 ```
 
-直接 `go build` 出来的二进制没有注入版本，此时 `details` 回落读取 Go 自带的 VCS 戳。
+`Variant` 区分是否编译进 IEC 61850（`simple` / `iec61850`），两种变体外观相同，
+现场只能靠这行分辨。直接 `go build` 出来的二进制没有注入，各字段显示 `dev` / `unknown`。
 
 启用 IEC 61850 MMS 服务端时：
 

@@ -33,14 +33,11 @@ func usage(w *os.File) {
 
 commands:
   run       start the simulator (default when no command is given)
-  details   print build version and effective configuration, then exit
+  details   show build details, then exit
   help      show this message
 
 flags (run):
   -config   path to config file (optional)
   -port     modbus TCP port, overrides config
-
-flags (details):
-  -config   path to config file (optional)
 `)
 }
