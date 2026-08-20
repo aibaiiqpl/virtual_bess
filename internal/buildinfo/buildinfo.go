@@ -27,7 +27,7 @@ type Info struct {
 	Platform  string // GOOS/GOARCH
 }
 
-// Get 汇总构建信息，缺失字段用 VCS 戳补齐，仍缺失时填 "unknown"。
+// Get 汇总构建信息；未经 ldflags 注入时整体回落到 Go 自带的 VCS 戳。
 func Get() Info {
 	info := Info{
 		Version:   Version,
@@ -36,7 +36,11 @@ func Get() Info {
 		GoVersion: runtime.Version(),
 		Platform:  runtime.GOOS + "/" + runtime.GOARCH,
 	}
-	fillFromVCS(&info)
+	// 只有完全没注入版本信息时才读 VCS：本仓库以 submodule 形式嵌在工作区里时，
+	// Go 会向上取到父仓库的 revision 和 dirty 状态，用它覆盖注入值会把干净构建误标为脏。
+	if info.Commit == "" {
+		fillFromVCS(&info)
+	}
 	if info.Version == "" {
 		info.Version = "dev"
 	}
@@ -49,7 +53,8 @@ func Get() Info {
 	return info
 }
 
-// fillFromVCS 用 go build 自动嵌入的 VCS 信息补齐未经 ldflags 注入的字段。
+// fillFromVCS 用 go build 自动嵌入的 VCS 信息填充构建标识，仅在未注入版本时调用。
+// 注意：仓库作为 submodule 使用时，Go 记录的可能是父仓库的提交，只能作为兜底参考。
 func fillFromVCS(info *Info) {
 	bi, ok := debug.ReadBuildInfo()
 	if !ok {
