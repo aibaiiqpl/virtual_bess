@@ -22,11 +22,8 @@ iec61850:
     - pcs_slave_id: 1
       address: ":102"
       ied_name: "pcs01"
-    - pcs_slave_id: 2
-      address: ":1102"
-      ied_name: "pcs02"
 
-# 日本大阪场景：60Hz 电网。
+# 日本大阪场景：60Hz 电网，单柜 2000kW。
 grid:
   # 关口表所在侧"相电压" V。现场关口电压等级 6.6kV 为线电压，
   # 仿真寄存器统一写相电压：6600 / √3 ≈ 3810.5 V。
@@ -34,26 +31,19 @@ grid:
   frequency: 60                # 大阪属日本西部，标称频率 60Hz
 
 pcs:
-  # PCS AC 出口"相电压" V。现场 PCS 电压等级 500V 为线电压，
-  # 仿真寄存器统一写相电压：500 / √3 ≈ 288.7 V。
-  ac_voltage: 288.7
+  # PCS AC 出口"相电压" V。现场 PCS 电压等级 480V 为线电压，
+  # 仿真寄存器统一写相电压：480 / √3 ≈ 277.1 V。
+  # 取标称值而非偏低值：真实工况围绕额定小幅波动，轻载略高、满功率放电略低。
+  ac_voltage: 277.1
 
-# 两套储能柜：每柜 1 PCS + 1 BMS（10 簇并联），无光伏。
+# 单套储能柜：1 PCS（2000kW）+ 1 BMS（10 簇并联，5016kWh，约 0.4C / 2.5h），无光伏。
 # battery_voltage_full=1382 → 串数 round(1382/3.6)=384，单体≈3.3V 时 pack≈1267V，
 # 对齐现场 BMS（单体 3.3V / 总电压 1268V）。每簇并联，簇电压≈pack 电压。
 battery_units:
   - pcs_slave_id: 1
     bms_slave_id: 11
     rated_capacity_kwh: 5016
-    rated_power_kw: 2500
-    initial_soc: 30.0
-    soh: 100.0
-    battery_voltage_full: 1382
-    cluster_count: 10
-  - pcs_slave_id: 2
-    bms_slave_id: 12
-    rated_capacity_kwh: 5016
-    rated_power_kw: 2500
+    rated_power_kw: 2000
     initial_soc: 30.0
     soh: 100.0
     battery_voltage_full: 1382
@@ -68,22 +58,15 @@ loads:
   - name: aux
     rated_power_kw: 16
 
-# 空调：每台设备使用独立 Modbus slave。
-# 风冷采用 AC-P-heidun.csv 的源寄存器布局；液冷采用 LC-tongfei.csv 的源寄存器布局。
+# 空调：每台设备使用独立 Modbus slave。单柜各保留一台，
+# 风冷采用 AC-P-heidun.csv 的源寄存器布局；液冷采用 LC-tongfei.csv 的源寄存器布局，
+# 两种都留是为了同时覆盖两套协议的解析验证。
 # 启动后状态机根据室内温度、制冷/制热设定及回差自动切换制冷、制热、待机。
 ac_units:
   - slave_id: 41
     name: ac-1
     indoor_temperature: 30
     ambient_temperature: 32
-    cooling_setpoint: 25
-    heating_setpoint: 15
-    cooling_differential: 2
-    heating_differential: 2
-  - slave_id: 42
-    name: ac-2
-    indoor_temperature: 29
-    ambient_temperature: 31
     cooling_setpoint: 25
     heating_setpoint: 15
     cooling_differential: 2
@@ -98,18 +81,10 @@ lc_units:
     heating_setpoint: 15
     cooling_differential: 2
     heating_differential: 2
-  - slave_id: 52
-    name: lc-2
-    indoor_temperature: 29
-    ambient_temperature: 31
-    cooling_setpoint: 25
-    heating_setpoint: 15
-    cooling_differential: 2
-    heating_differential: 2
 
 # 电表：
 #   - 31 main：6.6kV 关口表（PCC），is_main 聚合全部 PCS + 站用辅助负荷。
-#   - 32 aux ：500V 辅助/站用电表，本质是负载电表，计量站用辅助负荷 aux。
+#   - 32 aux ：480V 辅助/站用电表，本质是负载电表，计量站用辅助负荷 aux。
 # 电压统一写相电压（线电压 / √3），pt_ratio=1 时寄存器即一次相电压（0.1V）。
 meters:
   - slave_id: 31
@@ -120,7 +95,7 @@ meters:
   - slave_id: 32
     name: aux                 # 辅助/站用电表（≈ 负载电表，计量站用辅助负荷）
     load_names: [aux]
-    voltage: 288.7            # 500V 线电压 → 相电压 288.7V
+    voltage: 277.1            # 480V 线电压 → 相电压 277.1V
     pt_ratio: 1
 
 log:
