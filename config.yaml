@@ -36,7 +36,7 @@ pcs:
   # 取标称值而非偏低值：真实工况围绕额定小幅波动，轻载略高、满功率放电略低。
   ac_voltage: 277.1
 
-# 单套储能柜：1 PCS（2000kW）+ 1 BMS（10 簇并联，5016kWh，约 0.4C / 2.5h），无光伏。
+# 单套储能柜：1 PCS（2000kW）+ 1 BMS（20 簇并联，5016kWh，约 0.4C / 2.5h），无光伏。
 # battery_voltage_full=1382 → 串数 round(1382/3.6)=384，单体≈3.3V 时 pack≈1267V，
 # 对齐现场 BMS（单体 3.3V / 总电压 1268V）。每簇并联，簇电压≈pack 电压。
 battery_units:
@@ -47,7 +47,7 @@ battery_units:
     initial_soc: 30.0
     soh: 100.0
     battery_voltage_full: 1382
-    cluster_count: 10
+    cluster_count: 20
 
 # 无光伏：必须显式置空。LoadConfig 以 DefaultConfig 为基底再 yaml.Unmarshal，
 # 缺省 pv_units 键时不会清空默认值（默认含 1 台 PV slave 21），故须显式 []。
