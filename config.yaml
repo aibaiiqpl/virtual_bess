@@ -53,10 +53,9 @@ battery_units:
 # 缺省 pv_units 键时不会清空默认值（默认含 1 台 PV slave 21），故须显式 []。
 pv_units: []
 
-# 站用/辅助负荷：辅助电表后挂的小负载（空调、热管理、控制电源等），约十几千瓦。
-loads:
-  - name: aux
-    rated_power_kw: 16
+# 无站用负荷：关口表下为纯储能，不接负载。必须显式置空，理由同 pv_units——
+# LoadConfig 以 DefaultConfig 为基底 Unmarshal，缺省 loads 键会保留默认的 80kW 负载。
+loads: []
 
 # 空调：每台设备使用独立 Modbus slave。单柜各保留一台，
 # 风冷采用 AC-P-heidun.csv 的源寄存器布局；液冷采用 LC-tongfei.csv 的源寄存器布局，
@@ -83,19 +82,14 @@ lc_units:
     heating_differential: 2
 
 # 电表：
-#   - 31 main：6.6kV 关口表（PCC），is_main 聚合全部 PCS + 站用辅助负荷。
-#   - 32 aux ：480V 辅助/站用电表，本质是负载电表，计量站用辅助负荷 aux。
+#   - 31 main：6.6kV 关口表（PCC）。is_main 自动聚合全部 PCS/PV/负荷，本场景无 PV
+#     也无负荷，故关口表读数即纯储能出力。
 # 电压统一写相电压（线电压 / √3），pt_ratio=1 时寄存器即一次相电压（0.1V）。
 meters:
   - slave_id: 31
     name: main
-    is_main: true             # 关口表，聚合全部 PCS + 负荷
+    is_main: true             # 关口表，本场景下只聚合 PCS
     voltage: 3810.5           # 6.6kV 线电压 → 相电压 3810.5V
-    pt_ratio: 1
-  - slave_id: 32
-    name: aux                 # 辅助/站用电表（≈ 负载电表，计量站用辅助负荷）
-    load_names: [aux]
-    voltage: 277.1            # 480V 线电压 → 相电压 277.1V
     pt_ratio: 1
 
 log:
