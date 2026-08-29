@@ -82,15 +82,24 @@ lc_units:
     heating_differential: 2
 
 # 电表：
-#   - 31 main：6.6kV 关口表（PCC）。is_main 自动聚合全部 PCS/PV/负荷，本场景无 PV
-#     也无负荷，故关口表读数即纯储能出力。
-# 电压统一写相电压（线电压 / √3），pt_ratio=1 时寄存器即一次相电压（0.1V）。
+#   - 31 main       ：6.6kV 关口表（PCC）。is_main 自动聚合全部 PCS/PV/负荷，
+#                     本场景无 PV 也无负荷，故读数即纯储能出力。
+#   - 32 BESS-PCC1  ：480V 侧储能并网点表，只聚合 PCS 1，不挂任何负载。
+# voltage 一律填一次侧"相电压"（线电压 / √3）；寄存器存的是二次侧值 = 一次值 / pt_ratio。
+# 关口表按真实 6.6kV/100V 互感器取 pt_ratio=66，二次相电压 = 3810.5/66 ≈ 57.7V，
+# 正是标准 PT 二次值（100V 线电压 / √3）。二级 EMS 侧的 PT 必须同为 66 才能还原，
+# 两边不一致就会成倍放大或缩小。480V 侧直接接入，pt_ratio=1。
 meters:
   - slave_id: 31
     name: main
     is_main: true             # 关口表，本场景下只聚合 PCS
     voltage: 3810.5           # 6.6kV 线电压 → 相电压 3810.5V
-    pt_ratio: 1
+    pt_ratio: 66              # 6600/100 互感器；寄存器存二次值 ≈ 57.7V
+  - slave_id: 32
+    name: BESS-PCC1           # 储能并网点表（480V 侧），只聚合 PCS，不含负载
+    pcs_slave_ids: [1]
+    voltage: 277.1            # 480V 线电压 → 相电压 277.1V
+    pt_ratio: 1               # 低压侧直接接入
 
 log:
   file: "logs/virtual_bess.log"
