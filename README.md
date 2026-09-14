@@ -152,15 +152,15 @@ xn3477:
       cluster_slave_ids: [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
 ```
 
-`bms_slave_id` 只用于绑定 `battery_units` 中的内部仿真状态；端点对外使用 `bau_slave_id` 和 `cluster_slave_ids`。点表使用 [XN3477-BMS-Cluster.csv](../csv-config/docs/XN3477-IES900-4EMU/points/bms/XN3477-BMS-Cluster.csv)，读功能码支持 FC03/FC04，控制支持 FC06/FC16。完整六机柜配置见 `configs/bess_6_units_5mwh_2_5mw_xn3477.yaml`。
+`bms_slave_id` 只用于绑定 `battery_units` 中的内部仿真状态；端点对外使用 `bau_slave_id` 和 `cluster_slave_ids`。点表使用 [XN3477-BMS-Cluster.csv](../csv-config/projects/latvia/common/points/bms/XN3477-BMS-Cluster.csv)，读功能码支持 FC03/FC04，控制支持 FC06/FC16。完整六机柜配置见 `configs/bess_6_units_5mwh_2_5mw_xn3477.yaml`。
 
 ### 空调点位
 
 每个空调都是独立 Modbus slave。默认配置提供风冷 `41/42`、液冷 `51/52`，满足 AC1/AC2 和 LCU1/LCU2 的分设备映射需求。EMU-V2.0 的目标块分别是 AC `20000–20049` / `20050–20099`，LC `21000–21049` / `21050–21099`；应通过每台设备各自 CSV 映射，不能把不同 slave 合并为一个点表设备。
 
-风冷源地址使用 [AC-P-heidun.csv](../csv-config/docs/AC-P-heidun/AC-P-heidun.csv)：`0x106` 写 `1/0` 启停，`0x100/0x104` 写制冷/制热设定（S16，0.1℃），`0x101/0x105` 写制冷/制热回差（S16，0.1℃），`0x116` 读状态（0 关机/待机、2 制冷、3 制热），`0x10B` 读室内温度（S16，0.1℃）。
+风冷源地址使用 [AC-P-heidun.csv](../csv-config/points/ac/ac-p-heidun.csv)：`0x106` 写 `1/0` 启停，`0x100/0x104` 写制冷/制热设定（S16，0.1℃），`0x101/0x105` 写制冷/制热回差（S16，0.1℃），`0x116` 读状态（0 关机/待机、2 制冷、3 制热），`0x10B` 读室内温度（S16，0.1℃）。
 
-液冷源地址使用 [LC-tongfei.csv](../csv-config/docs/LC-tongfei/LC-tongfei.csv)：`0x300` 写 `1` 开机、`2` 关机、`4` 复位；`0x1003/0x1005` 写制冷/制热设定（整数℃），`0x1004/0x1006` 写制冷/制热回差（整数℃）；`0x0000` 高字节读状态（0 关机、1 制冷、2 制热），`0x0003/0x0004/0x0008` 分别读供水/回水/进气温度（S16，0.1℃），`0x0012/0x0013` 读供回水压力（U16，0.1kPa）。
+液冷源地址使用 [LC-tongfei.csv](../csv-config/points/lc/lc-tongfei.csv)：`0x300` 写 `1` 开机、`2` 关机、`4` 复位；`0x1003/0x1005` 写制冷/制热设定（整数℃），`0x1004/0x1006` 写制冷/制热回差（整数℃）；`0x0000` 高字节读状态（0 关机、1 制冷、2 制热），`0x0003/0x0004/0x0008` 分别读供水/回水/进气温度（S16，0.1℃），`0x0012/0x0013` 读供回水压力（U16，0.1kPa）。
 
 空调启用后，当室温达到制冷点时进入制冷，降至“制冷点 − 回差”后待机；低于制热点时进入制热，升至“制热点 + 回差”后待机。关闭命令立即返回关闭/待机状态。
 

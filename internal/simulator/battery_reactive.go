@@ -10,7 +10,7 @@ import (
 //
 // 模式编码取现场 IES900/IES1000 的 A13「无功功率设定模式」原生码（协议 V2.5 p.4，范围 0~2），
 // 与二级 EMS 侧 5007/5137 的枚举不同——两者之间的换码由 emu 的设备级点表 dzPoint /
-// statusPoint 完成（见 csv-config/docs/Latvia/common/points/pcs/PCS-IEC61850-MMS.csv），
+// statusPoint 完成（见 csv-config/projects/latvia/common/points/pcs/PCS-IEC61850-MMS.csv），
 // 仿真器只认原生码，避免在设备侧再做一次不一致的映射。
 const (
 	ReactiveModeConstQ  uint16 = 0 // 恒定无功：直接跟随 RegPCSReactivePowerCmd
