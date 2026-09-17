@@ -282,14 +282,14 @@ func (sim *Simulator) updateMeters(dt float64) {
 		for _, i := range agg.pcsIdx {
 			// 有功：BatteryUnit 是「负充正放」，电表侧要的是「充电为正」（充电即从电网买电），故取反。
 			pcs -= sim.batteries[i].ActualPowerKW()
-			// 无功取反，让关口表方向与现场一致。
+			// 无功不换向，与 PCS 侧同方向（感性为正）。
 			//
-			// 真机 IES900 的 61850 无功方向与二级 EMS 相反，emu 设备级点表因此在
-			// 无功的下发与遥测两侧都写了源系数 -1（见 Latvia 的 PCS-IEC61850-MMS.csv）。
-			// 对 EMS 而言两次取反抵消、闭环自洽；但关口表是不经过点表换算的第三方观测者，
-			// 抵消不到它。仿真器的 PCS 建模用的是 EMS 那一侧的方向（感性为正），
-			// 所以站点实际无功方向与现场相反，需要在这里补一次取反。
-			pcsReactive -= sim.batteries[i].ActualReactiveKVAr()
+			// 这里曾经取反一次，理由是真机 IES900 的 61850 无功方向与二级 EMS 相反、
+			// emu 点表两侧各写了源系数 -1、而关口表不经过点表抵消不到。但那个取反会让
+			// 同一股无功在 PCS 母线上是感性、在关口上是容性；自从关口电压跟着无功走
+			// （见 grid_voltage.go），这个矛盾就变成两条母线的电压往相反方向动，
+			// 物理上不可能同时成立。方向差属于点表换算的职责，不该由仿真器补偿。
+			pcsReactive += sim.batteries[i].ActualReactiveKVAr()
 		}
 		for _, i := range agg.pvIdx {
 			pv += sim.pvs[i].ActualPowerKW()

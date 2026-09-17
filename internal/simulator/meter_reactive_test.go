@@ -62,19 +62,37 @@ func TestMeterCurrentIncludesReactiveComponent(t *testing.T) {
 }
 
 // TestSimulatorAggregatesPCSReactiveIntoMeter 端到端：改电池单元的无功出力，
-// 关口表无功跟着走。有功与无功在聚合时都要换向，规则一并锁住：
-// 有功「负充正放 → 充电为正」，无功「按现场关口表方向取反」。
+// 关口表无功跟着走。聚合时只有有功换向（「负充正放 → 充电为正」），
+// 无功保持与 PCS 同向——两条母线的无功方向必须一致，否则电压会往相反方向动。
 func TestSimulatorAggregatesPCSReactiveIntoMeter(t *testing.T) {
 	sim := newTestSimulator(t)
 	bu := sim.batteries[0]
 	bu.actualPowerKW = 50      // 放电 50kW ⇒ 电表侧 -50（卖电）
-	bu.actualReactiveKVAr = 30 // ⇒ 电表侧 -30
+	bu.actualReactiveKVAr = 30 // 感性 30kvar ⇒ 电表侧同为 +30
 
 	sim.updateMeters(0)
 
 	meter := sim.meters[0].meter
 	assertFloatNear(t, meter.gridPowerKW, -50+meter.loadPowerKW-sim.pvs[0].ActualPowerKW())
-	assertFloatNear(t, meter.reactiveKVar, meter.loadPowerKW*loadTanPhi()-30)
+	assertFloatNear(t, meter.reactiveKVar, meter.loadPowerKW*loadTanPhi()+30)
+}
+
+// TestPCSAndMeterReactiveAgreeOnDirection 同一股无功在 PCS 母线和关口必须同向，
+// 否则两处电压会往相反方向动——这是取消关口取反的直接原因，用回归锁住。
+func TestPCSAndMeterReactiveAgreeOnDirection(t *testing.T) {
+	sim := newTestSimulator(t)
+	sim.loads = nil
+	sim.pvs = nil
+	for _, agg := range sim.meters {
+		agg.loadIdx, agg.pvIdx = nil, nil
+	}
+	sim.batteries[0].actualReactiveKVAr = 30 // 感性
+
+	sim.updateMeters(0)
+
+	if got := sim.meters[0].meter.reactiveKVar; got <= 0 {
+		t.Fatalf("meter reactive = %v, want > 0 (inductive, same direction as PCS)", got)
+	}
 }
 
 // TestMeterActiveSignIsChargePositive 关口表有功约定：正=充电（买电）、负=放电（卖电）。
