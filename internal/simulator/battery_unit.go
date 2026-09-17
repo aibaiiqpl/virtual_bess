@@ -23,6 +23,8 @@ type BatteryUnit struct {
 	quDeadband         float64
 	quFullResponse     float64
 	clusterCount       int
+	// coupling 本机交流母线相对上游的等效阻抗，把自身有功/无功换算成电压偏移。
+	coupling GridCouplingConfig
 
 	// 动态状态
 	currentEnergyKWh float64
@@ -32,8 +34,10 @@ type BatteryUnit struct {
 	gridTied         bool
 	// actualPowerKW 是交流侧实际有功，「负充正放」：正=放电、负=充电，
 	// 与 RegPCSPowerCmd 和 Modbus 交流有功点表同一套约定。
-	actualPowerKW        float64
-	actualReactiveKVAr   float64
+	actualPowerKW      float64
+	actualReactiveKVAr float64
+	// busVoltageV 交流出口母线相电压实测值（V），由 UpdateGridVoltage 按注入功率推进。
+	busVoltageV          float64
 	lastPowerCmdRaw      uint16
 	lastPowerCmdAliasRaw uint16
 	// PCS DC 欠压故障（HV 未合时尝试开机，或运行中 HV 被拉开）；置位后需通过故障复位清除
@@ -65,6 +69,9 @@ func NewBatteryUnit(cfg BatteryUnitConfig, pcsCfg PCSConfig, pcs, bms *SlaveBank
 		gridTied:           true,
 		bmsHVClosed:        true,
 		pcsRunning:         true,
+		// 起始按空载：母线电压等于额定，后续每 tick 由注入功率推开。
+		busVoltageV: pcsCfg.ACVoltage,
+		coupling:    resolveCoupling(pcsCfg.Coupling, defaultPCSCoupling(), cfg.RatedPowerKW),
 	}
 	// 直接用 Config 结构体构造（不走 LoadConfig 的 applyDefaults）时曲线可能为空，
 	// 这里兜底到默认曲线，避免 Q-U 计算出现除零。
@@ -221,6 +228,19 @@ func (bu *BatteryUnit) ProcessPCSControls() {
 		bu.pcsDCUnderVoltFault = false
 		bu.pcs.WriteU16(RegPCSFaultReset, 0)
 	}
+}
+
+// UpdateGridVoltage 按上一 tick 的有功/无功刷新交流出口母线电压。
+//
+// 必须在 ProcessPowerCommand 之前调用：Q-U 下垂读的就是这里更新出来的电压，
+// 隔一个 tick 再加一阶惯性，正是真机电压有效值滤波的行为，也是这个负反馈闭环
+// 不在相邻 tick 之间自激的原因（见 GridCouplingConfig.ResponseSeconds）。
+//
+// 符号换向：actualPowerKW「负充正放」，正值即向电网注入，直接用；
+// actualReactiveKVAr 正=感性=从电网吸收，注入量要取反。
+func (bu *BatteryUnit) UpdateGridVoltage(dt float64) {
+	target := busVoltageTarget(bu.coupling, bu.pcsACVoltage, bu.actualPowerKW, -bu.actualReactiveKVAr)
+	bu.busVoltageV = relaxVoltage(bu.busVoltageV, target, dt, bu.coupling.ResponseSeconds)
 }
 
 func (bu *BatteryUnit) ProcessPowerCommand() {

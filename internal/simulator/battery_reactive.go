@@ -104,13 +104,18 @@ func (bu *BatteryUnit) reactiveFromVoltageDroop() float64 {
 	return ratio * bu.ratedPowerKW
 }
 
-// gridPhaseVoltage 返回本 tick 用于控制与遥测的并网点相电压基准值：
-// 写过 RegPCSGridVoltageCmd 时用强制值，否则用配置额定值。
+// gridPhaseVoltage 返回本 tick 用于控制与遥测的并网点相电压基准值。
+//
+// 正常情况下取 busVoltageV——由本机注入功率推开的实测母线电压，充电压低、放电抬高、
+// 感性无功压低、容性无功抬高，Q-U 下垂靠它才构成闭环。
+//
+// 写过 RegPCSGridVoltageCmd 则改用强制值：那是仿真专用的旁路开关，用来把电压钉在
+// 某一点直接检验下垂曲线，此时本机自身的电压响应被刻意屏蔽。
 func (bu *BatteryUnit) gridPhaseVoltage() float64 {
 	if forced := bu.pcs.ReadU16(RegPCSGridVoltageCmd); forced != 0 {
 		return float64(forced) * 0.1
 	}
-	return bu.pcsACVoltage
+	return bu.busVoltageV
 }
 
 // limitReactiveByApparent 按视在容量钳制无功：额定容量取 ratedPowerKW（kVA），

@@ -121,11 +121,17 @@ func NewSimulator(cfg *Config, server *mbserver.Server) *Simulator {
 		loadIdxByName[ld.Name()] = i
 	}
 
+	// 站内 PCS 额定容量之和：并网点等效阻抗未整定 base_kva 时的兜底标幺基准。
+	var sitePCSRatedKVA float64
+	for _, buCfg := range cfg.BatteryUnits {
+		sitePCSRatedKVA += buCfg.RatedPowerKW
+	}
+
 	for _, mCfg := range cfg.Meters {
 		bank := NewSlaveBank(mCfg.SlaveID, false)
 		sim.banks[mCfg.SlaveID] = bank
 		agg := &meterAgg{
-			meter:   NewMeter(mCfg, sim.gridVoltage, bank),
+			meter:   NewMeter(mCfg, sim.gridVoltage, cfg.Grid.Coupling, sitePCSRatedKVA, bank),
 			isMain:  mCfg.IsMain,
 			outflow: mCfg.FlowDirection == "outflow",
 		}
@@ -246,6 +252,9 @@ func (sim *Simulator) Tick() {
 	for _, bu := range sim.batteries {
 		bu.ProcessBMSControls()
 		bu.ProcessPCSControls()
+		// 先按上一 tick 的出力刷新母线电压，再算本 tick 出力：
+		// Q-U 下垂读的是这里更新出来的电压，顺序颠倒会让下垂晚一拍跟随自己的无功。
+		bu.UpdateGridVoltage(dt)
 		bu.ProcessPowerCommand()
 		bu.UpdateEnergy(dt)
 	}

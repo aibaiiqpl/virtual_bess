@@ -32,11 +32,27 @@ grid:
   # 仿真寄存器统一写相电压：6600 / √3 ≈ 3810.5 V。
   voltage: 3810.5
   frequency: 60                # 大阪属日本西部，标称频率 60Hz
+  # 并网点等效阻抗：站内净潮流经它换算成关口电压偏移。
+  # 买电（充电/带负载）压低电压，卖电（放电/光伏倒送）抬高电压；
+  # 感性无功压低、容性无功抬高。留空则套用默认值。
+  coupling:
+    base_kva: 0                # 0 = 站内 PCS 额定容量之和
+    resistance_pu: 0.010
+    reactance_pu: 0.040
+    response_seconds: 3
 
 pcs:
   # PCS AC 出口"相电压" V。现场 PCS 电压等级 500V 为线电压，
   # 仿真寄存器统一写相电压：500 / √3 ≈ 288.7 V。
   ac_voltage: 288.7
+  # PCS 出口母线等效阻抗，同时是 Q-U 下垂的反馈通道：
+  # 没有它，Q-U 模式下电压恒等于额定值、下垂永不动作。
+  # response_seconds 必须 > 0，否则该闭环会在相邻 tick 之间自激。
+  coupling:
+    base_kva: 0                # 0 = 本单元 rated_power_kw
+    resistance_pu: 0.015
+    reactance_pu: 0.060
+    response_seconds: 2
 
 # 两套储能柜：每柜 1 PCS + 1 BMS（10 簇并联），无光伏。
 # battery_voltage_full=1382 → 串数 round(1382/3.6)=384，单体≈3.3V 时 pack≈1267V，
