@@ -43,8 +43,12 @@ func (bu *BatteryUnit) updateReactiveOutput() {
 }
 
 // reactiveTargetKVAr 按无功模式计算无功出力目标（未加抖动，未按视在容量钳制）。
-// activeKW 用内部「负充正放」语义（只取绝对值参与计算），无功正=感性、负=容性，
-// 与 RegPCSReactivePowerCmd 一致。
+// activeKW 用内部「负充正放」语义（只取绝对值参与计算），无功用 IES900 原生口径
+// 正=容性（向电网发出）、负=感性（从电网吸收），与 RegPCSReactivePowerCmd 一致。
+//
+// 之所以随设备而不是随二级 EMS：本仿真器扮演的就是 IES900，emu 设备级点表在下发和
+// 遥测两侧各写了源系数 -1 来抵消这个方向差。仿真器若改用 EMS 口径，那两个 -1 就没人
+// 抵消，表现为「下发容性、实际吸感性、电压不升反降」。
 func (bu *BatteryUnit) reactiveTargetKVAr(mode uint16, activeKW float64) float64 {
 	switch mode {
 	case ReactiveModeConstPF:
@@ -79,8 +83,8 @@ func (bu *BatteryUnit) reactiveFromPowerFactor(activeKW float64) float64 {
 	return reactive
 }
 
-// reactiveFromVoltageDroop Q-U 模式：电压高于额定则吸收无功（感性，正），低于额定则发出
-// 无功（容性，负），死区内不动作，超过满出力偏差后饱和在额定容量。
+// reactiveFromVoltageDroop Q-U 模式：电压高于额定则吸收无功（感性，负），低于额定则发出
+// 无功（容性，正），死区内不动作，超过满出力偏差后饱和在额定容量。
 //
 // 取的是「整定电压」而不是遥测寄存器里的带抖动值：真机 Q-U 的输入是滤波后的电压有效值，
 // 直接用每 tick ±0.5% 的抖动值会让出力在死区边界反复翻转，也无法写确定性回归。
@@ -99,15 +103,15 @@ func (bu *BatteryUnit) reactiveFromVoltageDroop() float64 {
 		ratio = 1
 	}
 	if deviation < 0 {
-		return -ratio * bu.ratedPowerKW
+		return ratio * bu.ratedPowerKW
 	}
-	return ratio * bu.ratedPowerKW
+	return -ratio * bu.ratedPowerKW
 }
 
 // gridPhaseVoltage 返回本 tick 用于控制与遥测的并网点相电压基准值。
 //
 // 正常情况下取 busVoltageV——由本机注入功率推开的实测母线电压，充电压低、放电抬高、
-// 感性无功压低、容性无功抬高，Q-U 下垂靠它才构成闭环。
+// 感性无功（负）压低、容性无功（正）抬高，Q-U 下垂靠它才构成闭环。
 //
 // 写过 RegPCSGridVoltageCmd 则改用强制值：那是仿真专用的旁路开关，用来把电压钉在
 // 某一点直接检验下垂曲线，此时本机自身的电压响应被刻意屏蔽。

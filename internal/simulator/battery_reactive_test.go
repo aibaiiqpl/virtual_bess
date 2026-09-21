@@ -105,10 +105,11 @@ func TestReactiveModeQUFollowsVoltageDeviation(t *testing.T) {
 		tolerance float64
 	}{
 		{name: "inside deadband", voltageV: 402, wantKVAr: 0, tolerance: 0.001},
-		{name: "overvoltage half", voltageV: 412, wantKVAr: 0.5 * testRatedPowerKW, tolerance: 0.5},
-		{name: "overvoltage saturated", voltageV: 440, wantKVAr: testRatedPowerKW, tolerance: 0.8},
-		{name: "undervoltage half", voltageV: 388, wantKVAr: -0.5 * testRatedPowerKW, tolerance: 0.5},
-		{name: "undervoltage saturated", voltageV: 360, wantKVAr: -testRatedPowerKW, tolerance: 0.8},
+		// IES900 原生口径：吸收感性为负、发出容性为正。
+		{name: "overvoltage half", voltageV: 412, wantKVAr: -0.5 * testRatedPowerKW, tolerance: 0.5},
+		{name: "overvoltage saturated", voltageV: 440, wantKVAr: -testRatedPowerKW, tolerance: 0.8},
+		{name: "undervoltage half", voltageV: 388, wantKVAr: 0.5 * testRatedPowerKW, tolerance: 0.5},
+		{name: "undervoltage saturated", voltageV: 360, wantKVAr: testRatedPowerKW, tolerance: 0.8},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bu := newReadyBattery(t)

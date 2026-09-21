@@ -17,13 +17,13 @@ func loadTanPhi() float64 {
 
 // MeterInput 是电表本 tick 的聚合输入，全部为一次侧工程量。
 //
-// 有功的符号约定刻意与 BatteryUnit 内部不同，由调用方换向（见 updateMeters）：
-// PCSKW 充电为正（充电即从电网买电），而 BatteryUnit 是负充正放。
-// 无功则与 PCS 侧同向，不做换算。
+// 符号约定刻意与 BatteryUnit 内部不同，两项都由调用方换向（见 updateMeters）：
+//   - PCSKW 充电为正（充电即从电网买电），而 BatteryUnit 是负充正放
+//   - PCSKVAr 感性为正（从电网吸收），而 PCS 侧用 IES900 原生口径正=容性
 type MeterInput struct {
 	LoadKW  float64 // 负载有功，>= 0
 	PCSKW   float64 // PCS 有功，充电为正
-	PCSKVAr float64 // PCS 无功，感性为正（与 PCS 侧 30014/30062 同向）
+	PCSKVAr float64 // PCS 无功，感性为正（与 PCS 侧 30014/30062 反向）
 	PVKW    float64 // PV 有功，>= 0
 }
 

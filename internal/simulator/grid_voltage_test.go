@@ -67,9 +67,9 @@ func TestBusVoltageFollowsReactivePower(t *testing.T) {
 		reactiveKV float64
 		wantV      float64
 	}{
-		// 偏移 = ∓120*0.06/120 = ∓6%
-		{name: "inductive drops", reactiveKV: 120, wantV: 376},
-		{name: "capacitive raises", reactiveKV: -120, wantV: 424},
+		// 偏移 = ±120*0.06/120 = ±6%；IES900 原生口径正=容性。
+		{name: "capacitive raises", reactiveKV: 120, wantV: 424},
+		{name: "inductive drops", reactiveKV: -120, wantV: 376},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			bu := newReadyBattery(t)
@@ -127,8 +127,8 @@ func TestQUDroopClosesLoopThroughBusVoltage(t *testing.T) {
 		}
 	}
 
-	if math.Abs(bu.actualReactiveKVAr-18) > 1.0 {
-		t.Fatalf("actualReactiveKVAr = %v, want 18±1 (inductive, pulling voltage back down)", bu.actualReactiveKVAr)
+	if math.Abs(bu.actualReactiveKVAr+18) > 1.0 {
+		t.Fatalf("actualReactiveKVAr = %v, want -18±1 (inductive, pulling voltage back down)", bu.actualReactiveKVAr)
 	}
 	if math.Abs(bu.busVoltageV-406.4) > 0.5 {
 		t.Fatalf("busVoltageV = %v, want 406.4±0.5", bu.busVoltageV)

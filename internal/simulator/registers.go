@@ -35,9 +35,9 @@ const (
 	// 地址号相同、方向相反，排查时先确认自己站在哪一侧。
 	RegPCSPowerCmdAlias    = 3010  // S16, 0.1kW, alias of RegPCSPowerCmd
 	RegPCSPowerCmd         = 30010 // S16, 0.1kW, negative=charge, positive=discharge
-	RegPCSReactivePowerCmd = 30014 // S16, 0.1kVAr, positive=inductive, negative=capacitive
+	RegPCSReactivePowerCmd = 30014 // S16, 0.1kVAr, IES900 native: positive=capacitive, negative=inductive
 	RegPCSReactiveModeCmd  = 30015 // U16, 无功设定模式，取 IES900 A13 原生码：0-恒定无功 1-恒定功率因数 2-Q-U
-	RegPCSPowerFactorCmd   = 30016 // S16, 0.001, 恒定功率因数设定值，正=感性 负=容性；0 视为 1.0（纯有功）
+	RegPCSPowerFactorCmd   = 30016 // S16, 0.001, 恒定功率因数设定值，符号与无功一致：正=容性 负=感性；0 视为 1.0（纯有功）
 	// RegPCSGridVoltageCmd 是仿真专用的并网点相电压强制值，真机没有该寄存器。
 	// Q-U 模式必须能在测试和联调中人为制造电压偏差，否则相电压永远贴着额定值、
 	// 落在死区内，Q-U 出力恒为 0 无法验证。写 0 表示恢复按额定电压模拟。

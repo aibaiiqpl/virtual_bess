@@ -93,7 +93,7 @@ func NewBatteryUnit(cfg BatteryUnitConfig, pcsCfg PCSConfig, pcs, bms *SlaveBank
 
 func (bu *BatteryUnit) ActualPowerKW() float64 { return bu.actualPowerKW }
 
-// ActualReactiveKVAr 交流侧实际无功，正=感性（吸收）、负=容性（发出）。
+// ActualReactiveKVAr 交流侧实际无功，IES900 原生口径：正=容性（发出）、负=感性（吸收）。
 func (bu *BatteryUnit) ActualReactiveKVAr() float64 { return bu.actualReactiveKVAr }
 
 func (bu *BatteryUnit) PCSSlaveID() uint8 { return bu.pcs.SlaveID }
@@ -237,9 +237,9 @@ func (bu *BatteryUnit) ProcessPCSControls() {
 // 不在相邻 tick 之间自激的原因（见 GridCouplingConfig.ResponseSeconds）。
 //
 // 符号换向：actualPowerKW「负充正放」，正值即向电网注入，直接用；
-// actualReactiveKVAr 正=感性=从电网吸收，注入量要取反。
+// actualReactiveKVAr 用 IES900 原生口径，正=容性=向电网发出，同样直接用。
 func (bu *BatteryUnit) UpdateGridVoltage(dt float64) {
-	target := busVoltageTarget(bu.coupling, bu.pcsACVoltage, bu.actualPowerKW, -bu.actualReactiveKVAr)
+	target := busVoltageTarget(bu.coupling, bu.pcsACVoltage, bu.actualPowerKW, bu.actualReactiveKVAr)
 	bu.busVoltageV = relaxVoltage(bu.busVoltageV, target, dt, bu.coupling.ResponseSeconds)
 }
 

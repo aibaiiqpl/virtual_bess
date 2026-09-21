@@ -141,8 +141,9 @@ func (bu *BatteryUnit) syncPCSPower(powerKW, reactiveKVAr float64) {
 	if apparentKVA > 0 {
 		powerFactor = math.Abs(powerKW) / apparentKVA
 	}
-	// 功率因数回读带符号：正=感性、负=容性，与 A6 设定值和 30014 无功符号一致，
-	// 否则二级 EMS 下发 PF=-0.9 后回读到 +0.9，无法判断无功方向是否跟随。
+	// 功率因数回读带符号，与 A6 设定值和 30014 的无功符号一致（IES900 原生口径下
+	// 正=容性、负=感性），否则二级 EMS 下发 PF=-0.9 后回读到 +0.9，
+	// 无法判断无功方向是否跟随。
 	if reactiveKVAr < 0 {
 		powerFactor = -powerFactor
 	}
