@@ -232,9 +232,10 @@ func TestMeterVoltageFollowsGridFlow(t *testing.T) {
 		{name: "charging drops", in: MeterInput{PCSKW: 120}, wantV: 217.8},
 		{name: "discharging raises", in: MeterInput{PCSKW: -120}, wantV: 222.2},
 		{name: "pv export raises", in: MeterInput{PVKW: 120}, wantV: 222.2},
-		// 无功偏移 = ∓120*0.04/120 = ∓4%；PCSKVAr 感性为正。
-		{name: "inductive drops", in: MeterInput{PCSKVAr: 120}, wantV: 211.2},
-		{name: "capacitive raises", in: MeterInput{PCSKVAr: -120}, wantV: 228.8},
+		// 无功偏移 = ∓120*0.12/120 = ∓12%；PCSKVAr 感性为正。
+		// 无功灵敏度刻意远大于有功：关口电压要能被无功推得动，上游 Q(U) 闭环才测得出过冲。
+		{name: "inductive drops", in: MeterInput{PCSKVAr: 120}, wantV: 193.6},
+		{name: "capacitive raises", in: MeterInput{PCSKVAr: -120}, wantV: 246.4},
 		{name: "idle stays nominal", in: MeterInput{}, wantV: 220},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

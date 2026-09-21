@@ -161,12 +161,17 @@ func (m *Meter) Sync() {
 	m.bank.WriteS32(RegMeterForwardEnergyHi, int32(m.forwardKWh*100/ptct))
 	m.bank.WriteS32(RegMeterReverseEnergyHi, int32(m.reverseKWh*100/ptct))
 
-	// 三相电压 ±0.5% jitter；基准取随潮流变化的 busVoltage 而非额定值，
+	// 三相电压 ±0.1% jitter；基准取随潮流变化的 busVoltage 而非额定值，
 	// phaseVoltages 保留一次侧，寄存器存二次侧 (U16, 0.1 V)
+	//
+	// 抖动幅度从 ±0.5% 收到 ±0.1%：±0.5% 在 10 kV 上是 ±50 V，比无功推开的电压还大，
+	// 上游看到的是噪声而不是自己的调节结果，Q(U) 闭环的过冲和振铃全被盖住。真机电表
+	// 的有效值读数本来也没有逐拍 ±0.5% 的随机跳动。±0.1% 折合 ±10 V，恰好一个寄存器
+	// 最小刻度（二次侧 0.1 V × PT 100），仍能体现三相不平衡。
 	phaseVoltages := [3]float64{}
 	phaseVoltRegs := [3]uint16{RegMeterVoltageA, RegMeterVoltageB, RegMeterVoltageC}
 	for i, reg := range phaseVoltRegs {
-		jitter := 1.0 + (rand.Float64()*0.01 - 0.005)
+		jitter := 1.0 + (rand.Float64()*0.002 - 0.001)
 		v := m.busVoltage * jitter
 		phaseVoltages[i] = v
 		secondary := v / m.ptRatio

@@ -48,10 +48,22 @@ func defaultPCSCoupling() GridCouplingConfig {
 	return GridCouplingConfig{ResistancePU: 0.015, ReactancePU: 0.06, ResponseSeconds: 2}
 }
 
-// defaultGridCoupling 并网点的默认等效阻抗。相对整站容量而言电网更「硬」，
-// 故标幺值小于 PCS 侧；时间常数更大，对应电表更慢的有效值刷新。
+// defaultGridCoupling 并网点的默认等效阻抗。时间常数比 PCS 侧更大，对应电表更慢的
+// 有效值刷新。
+//
+// ReactancePU 取 0.12 而不是按短路容量算出的 0.04：仿真器的用途是把上游 Q(U) 闭环
+// 推到临界点看它会不会过头，而 0.04 下并网点几乎不动——满额无功才推开 1%，连电表
+// 自身的电压抖动都盖不过，闭环等于开环空转，什么都测不出来。
+//
+// 取值上界由上游稳定性定。上游 Q(U) 的环路增益 L = 曲线斜率[MVAr/pu] × X/S基准，
+// 陡段（0.4 Q/Pmax 落在 0.025 pu 内）斜率约 16·Pmax/pu；本仿真站 S基准 15 MVA、
+// Pmax 9.5 MW 时 0.12 对应 L≈1.2，正是真实站点短路容量 200–300 MVA 对应的区间上沿，
+// 也就是上游那 30% 逼近步长被设计来对付的最坏情况。再往上要连带把步长调小，
+// 否则 k(1+L)>1，仿真出的振荡只是参数不自洽，不是被测对象的问题。
+//
+// 需要另一档灵敏度时在 config.yaml 的 grid.coupling.reactance_pu 里覆盖，不必改代码。
 func defaultGridCoupling() GridCouplingConfig {
-	return GridCouplingConfig{ResistancePU: 0.010, ReactancePU: 0.040, ResponseSeconds: 3}
+	return GridCouplingConfig{ResistancePU: 0.010, ReactancePU: 0.120, ResponseSeconds: 3}
 }
 
 // resolveCoupling 补齐未整定的等效阻抗字段，返回可直接使用的配置。
