@@ -40,7 +40,18 @@ type GridCouplingConfig struct {
 
 // maxVoltageDeviationPU 电压偏移的数值护栏。并网点的聚合注入可能超过基准容量
 // （子电表沿用整站基准时尤其如此），线性外推会把电压推成负值并让 U16 寄存器回绕。
-const maxVoltageDeviationPU = 0.3
+//
+// 放宽到 0.5：关口电抗已刻意整定成远超物理值的量级（见 defaultGridCoupling），
+// 站点申报的满额无功在这个电抗下就能推开 30%，护栏留在 0.3 会让整个申报区间的上半段
+// 全贴在鞍上，看不出无功和电压的对应关系。0.5 对 U16 仍然安全：10 kV 站点最高到
+// 15 kV，二次侧 150 V 写进寄存器是 1500，离回绕很远。
+const maxVoltageDeviationPU = 0.5
+
+// maxCouplingPU 是单项等效阻抗的整定上界，只用来拦住量纲写错一类的输入。
+//
+// 它不再按「额定功率下不得贴住护栏」来定：仿真器刻意把关口电抗放大到物理值的几十倍，
+// 真正防止电压跑飞的是 maxVoltageDeviationPU 的运行时钳位，不是这条启动校验。
+const maxCouplingPU = 2.0
 
 // defaultPCSCoupling PCS 出口母线的默认等效阻抗：
 // 一台 uk≈6%、X/R≈4 的升压变，标幺基准取 PCS 自身额定容量。
@@ -51,25 +62,30 @@ func defaultPCSCoupling() GridCouplingConfig {
 // defaultGridCoupling 并网点的默认等效阻抗。时间常数比 PCS 侧更大，对应电表更慢的
 // 有效值刷新。
 //
-// ReactancePU 取 0.20 而不是按短路容量算出的 0.04：仿真器的用途是把上游 Q(U) 闭环
-// 推到临界点看它会不会过头，而 0.04 下并网点几乎不动——满额无功才推开 1%，连电压
-// 遥测 10 V 的寄存器刻度都跨不过两格，闭环等于开环空转，什么都测不出来。
-// 0.20 对应 133 V/MVAr，满额 3.75 MVAr 推开 5%，趋势图上一眼可见。
+// ReactancePU 取 1.2，是按短路容量算出的物理值（约 0.04）的三十倍。这不是建模误差，
+// 是本仿真器的用途决定的：它要把上游 Q(U) 闭环推到看得见的幅度，而物理值下并网点
+// 几乎不动——满额无功才推开 1%，十几 kvar 的小指令连电压寄存器 10 V 的刻度都跨不过
+// 一格，闭环在数据上等于开环空转，什么都测不出来。
 //
-// 取值上界由上游稳定性定。上游 Q(U) 的环路增益 L = 曲线斜率[MVAr/pu] × X/S基准，
-// 陡段（0.4 Q/Pmax 落在 0.025 pu 内）斜率约 16·Pmax/pu；本仿真站 S基准 15 MVA、
-// Pmax 9.5 MW 时 0.20 对应 L≈2.0，上游默认 30% 步长下 k(1+L)=0.91，仍在收敛侧，
-// 但已经能看到明显的过冲和振铃——这正是要测的现象。再往上 k(1+L)>1 就发散了，
-// 那时必须连带把步长调小，否则仿真出的振荡只说明参数不自洽，不是被测对象的问题。
-// 硬上界另有一条：validate 要求 R+X ≤ 0.3，否则电压会长期贴在护栏上。
+// 1.2 折合 800 V/MVAr（S基准 15 MVA、10 kV 站）：15 kvar 推开 12 V，1 MVAr 推开 8%，
+// 站点申报的 3.75 MVAr 推开 30%。趋势图上无功和电压的对应关系一眼可见。
 //
-// 注意灵敏度不是唯一的限制项。闭环稳态下电压能偏离多远由曲线零点决定——
+// 代价必须清楚：上游 Q(U) 的环路增益同比放大。L = 曲线斜率[MVAr/pu] × X/S基准，
+// Pmax 9.5 MW 的站在 0.875→0.95 这种常规斜率上 L≈4，陡段 L≈12。上游默认 30% 逼近
+// 步长下 k(1+L) 远大于 1，一定发散——这正是要观察的现象；要让它收敛，把 Q(U) 页面的
+// 逼近步长降到 1/(1+L) 以下（L=4 对应 20%，陡段对应 8%）。
+//
+// 换句话说，这个默认值把仿真站做成了一个「弱电网」，专门用来检验上游步长整定是否够
+// 保守。要仿真真实站点的响应，在 config.yaml 的 grid.coupling.reactance_pu 里覆盖成
+// 0.04 量级。
+//
+// 还要注意灵敏度不是唯一的限制项：闭环稳态下电压能偏离多远由曲线零点决定——
 // ΔU = (自然电压 − 曲线零点) × L/(1+L)，工作点落在曲线平段时无功本身就是 0，
 // 这时候灵敏度调多大都看不到电压动。
 //
 // 需要另一档灵敏度时在 config.yaml 的 grid.coupling.reactance_pu 里覆盖，不必改代码。
 func defaultGridCoupling() GridCouplingConfig {
-	return GridCouplingConfig{ResistancePU: 0.010, ReactancePU: 0.200, ResponseSeconds: 3}
+	return GridCouplingConfig{ResistancePU: 0.010, ReactancePU: 1.200, ResponseSeconds: 3}
 }
 
 // resolveCoupling 补齐未整定的等效阻抗字段，返回可直接使用的配置。
@@ -124,8 +140,8 @@ func (c GridCouplingConfig) validate(name string) error {
 	if c.ResistancePU < 0 || c.ReactancePU < 0 {
 		return fmt.Errorf("%s: resistance_pu/reactance_pu must not be negative", name)
 	}
-	if sum := c.ResistancePU + c.ReactancePU; sum > maxVoltageDeviationPU {
-		return fmt.Errorf("%s: resistance_pu+reactance_pu = %.3f exceeds the %.2f pu guard, voltage would saturate at rated power", name, sum, maxVoltageDeviationPU)
+	if c.ResistancePU > maxCouplingPU || c.ReactancePU > maxCouplingPU {
+		return fmt.Errorf("%s: resistance_pu/reactance_pu must not exceed %.1f pu", name, maxCouplingPU)
 	}
 	if c.BaseKVA < 0 {
 		return fmt.Errorf("%s: base_kva must not be negative", name)

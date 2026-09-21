@@ -182,7 +182,8 @@ func TestCouplingConfigRejectsInvalidImpedance(t *testing.T) {
 	}{
 		{name: "negative resistance", cfg: GridCouplingConfig{ResistancePU: -0.01, ReactancePU: 0.04}},
 		{name: "negative reactance", cfg: GridCouplingConfig{ResistancePU: 0.01, ReactancePU: -0.04}},
-		{name: "saturating impedance", cfg: GridCouplingConfig{ResistancePU: 0.2, ReactancePU: 0.2}},
+		{name: "resistance out of range", cfg: GridCouplingConfig{ResistancePU: maxCouplingPU + 0.1, ReactancePU: 0.04}},
+		{name: "reactance out of range", cfg: GridCouplingConfig{ResistancePU: 0.01, ReactancePU: maxCouplingPU + 0.1}},
 		{name: "negative base", cfg: GridCouplingConfig{ResistancePU: 0.01, BaseKVA: -1}},
 		{name: "negative response", cfg: GridCouplingConfig{ResistancePU: 0.01, ResponseSeconds: -1}},
 	} {
@@ -210,7 +211,7 @@ func TestResolveCouplingKeepsExplicitZero(t *testing.T) {
 	}
 }
 
-// 默认并网点等效阻抗 R=0.01 / X=0.04（标幺，基准=站内 PCS 额定容量之和 120kW），额定 220V。
+// 默认并网点等效阻抗 R=0.01 / X=1.2（标幺，基准=站内 PCS 额定容量之和 120kW），额定 220V。
 
 // settleMeterVoltage 反复推进电表电压惯性直到稳态。
 func settleMeterVoltage(m *Meter, in MeterInput, ticks int) {
@@ -232,11 +233,35 @@ func TestMeterVoltageFollowsGridFlow(t *testing.T) {
 		{name: "charging drops", in: MeterInput{PCSKW: 120}, wantV: 217.8},
 		{name: "discharging raises", in: MeterInput{PCSKW: -120}, wantV: 222.2},
 		{name: "pv export raises", in: MeterInput{PVKW: 120}, wantV: 222.2},
-		// 无功偏移 = ∓120*0.20/120 = ∓20%；PCSKVAr 感性为正。
+		// 无功偏移 = ∓12*1.2/120 = ∓12%；PCSKVAr 感性为正。用 12 kvar 而不是满基准的
+		// 120 kvar：默认电抗已放大到 1.2 pu，满基准无功会直接顶到钳位，测不出灵敏度。
 		// 无功灵敏度刻意远大于有功：关口电压要能被无功推得动，上游 Q(U) 闭环才测得出过冲。
-		{name: "inductive drops", in: MeterInput{PCSKVAr: 120}, wantV: 176},
-		{name: "capacitive raises", in: MeterInput{PCSKVAr: -120}, wantV: 264},
+		{name: "inductive drops", in: MeterInput{PCSKVAr: 12}, wantV: 193.6},
+		{name: "capacitive raises", in: MeterInput{PCSKVAr: -12}, wantV: 246.4},
 		{name: "idle stays nominal", in: MeterInput{}, wantV: 220},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestMeter(t)
+			settleMeterVoltage(m, tc.in, 300)
+
+			if math.Abs(m.busVoltage-tc.wantV) > 0.05 {
+				t.Fatalf("busVoltage = %v, want %v", m.busVoltage, tc.wantV)
+			}
+		})
+	}
+}
+
+// TestMeterVoltageClampsAtTheGuard 无功大到把线性外推推出护栏时必须停在护栏上：
+// 关口电抗刻意放得很大，满基准无功的线性值会到 120%，不钳住就会把电压推成负值、
+// 让 U16 寄存器回绕。
+func TestMeterVoltageClampsAtTheGuard(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		in    MeterInput
+		wantV float64
+	}{
+		{name: "capacitive clamps high", in: MeterInput{PCSKVAr: -120}, wantV: 220 * (1 + maxVoltageDeviationPU)},
+		{name: "inductive clamps low", in: MeterInput{PCSKVAr: 120}, wantV: 220 * (1 - maxVoltageDeviationPU)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			m := newTestMeter(t)
