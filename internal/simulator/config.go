@@ -16,6 +16,9 @@ type GridConfig struct {
 	// Frequency 电网标称频率 Hz：50（默认，中国/欧洲）或 60（日本东部、北美等 60Hz 区域）。
 	// 统一供电表 / PCS / PV 同步点写频率寄存器，避免在多处硬编码。
 	Frequency float64 `yaml:"frequency"`
+	// Coupling 并网点相对上游电网的等效阻抗，决定站内净潮流如何抬高/压低关口电压。
+	// 留空则套用 defaultGridCoupling()。
+	Coupling GridCouplingConfig `yaml:"coupling"`
 }
 
 type PCSConfig struct {
@@ -24,6 +27,10 @@ type PCSConfig struct {
 	ACVoltage float64 `yaml:"ac_voltage"`
 	// ReactiveQU 是 Q-U（无功-电压下垂）模式的整定曲线，只在无功模式=2 时生效。
 	ReactiveQU ReactiveQUConfig `yaml:"reactive_qu"`
+	// Coupling 是 PCS 交流出口母线相对上游的等效阻抗，决定本机有功/无功如何改变自身并网点电压。
+	// 它同时是 Q-U 下垂的反馈通道：没有它，Q-U 模式下电压恒等于额定值、下垂永不动作。
+	// 留空则套用 defaultPCSCoupling()。
+	Coupling GridCouplingConfig `yaml:"coupling"`
 }
 
 // ReactiveQUConfig 描述 Q-U 下垂特性：以额定相电压为基准的标幺电压偏差映射到无功出力。
@@ -347,6 +354,12 @@ func applyAirConditionerDefaults(cfg *AirConditionerConfig) {
 func (c *Config) validate() error {
 	// 时区非法直接拒绝启动：错误时区会让整条 PV/负荷曲线偏移，事后极难察觉。
 	if _, err := resolveLocation(c.Timezone); err != nil {
+		return err
+	}
+	if err := c.Grid.Coupling.validate("grid.coupling"); err != nil {
+		return err
+	}
+	if err := c.PCS.Coupling.validate("pcs.coupling"); err != nil {
 		return err
 	}
 	if len(c.BatteryUnits) == 0 {

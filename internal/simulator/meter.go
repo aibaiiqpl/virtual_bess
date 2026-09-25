@@ -17,13 +17,13 @@ func loadTanPhi() float64 {
 
 // MeterInput 是电表本 tick 的聚合输入，全部为一次侧工程量。
 //
-// 符号约定刻意与 BatteryUnit 内部不同，两项都由调用方换向，理由见 updateMeters：
+// 符号约定刻意与 BatteryUnit 内部不同，两项都由调用方换向（见 updateMeters）：
 //   - PCSKW 充电为正（充电即从电网买电），而 BatteryUnit 是负充正放
-//   - PCSKVAr 感性为正，与现场关口表口径一致
+//   - PCSKVAr 感性为正（从电网吸收），而 PCS 侧用 IES900 原生口径正=容性
 type MeterInput struct {
 	LoadKW  float64 // 负载有功，>= 0
 	PCSKW   float64 // PCS 有功，充电为正
-	PCSKVAr float64 // PCS 无功，感性为正
+	PCSKVAr float64 // PCS 无功，感性为正（与 PCS 侧 30014/30062 反向）
 	PVKW    float64 // PV 有功，>= 0
 }
 
@@ -33,21 +33,31 @@ type Meter struct {
 	bank *SlaveBank
 	name string
 
-	gridVoltage float64 // 一次侧电压 V
+	gridVoltage float64 // 一次侧额定电压 V
 	ptRatio     float64 // 电压互感器变比（一次/二次）
 	ctRatio     float64 // 电流互感器变比（一次/二次）
+	// coupling 本表所在母线相对上游电网的等效阻抗。
+	coupling GridCouplingConfig
+	// outflow 与 MeterConfig.FlowDirection 一致，仅影响 forward/reverse 的显示方向。
+	// 电压偏移必须按真实潮流算，所以要靠它把显示方向还原回物理方向，见 physicalImportKW。
+	outflow bool
 
 	// 当前 tick 输入
 	gridPowerKW  float64
 	loadPowerKW  float64
 	reactiveKVar float64
+	// busVoltage 一次侧实测电压 V，由 updateVoltage 按本表处潮流推进。
+	busVoltage float64
 
 	// 累计能量
 	forwardKWh float64
 	reverseKWh float64
 }
 
-func NewMeter(cfg MeterConfig, defaultVoltage float64, bank *SlaveBank) *Meter {
+// NewMeter 构造一块电表。
+// coupling 为站点级等效阻抗配置，autoBaseKVA 是它在未整定 base_kva 时的兜底基准容量
+// （取站内 PCS 额定容量之和）。
+func NewMeter(cfg MeterConfig, defaultVoltage float64, coupling GridCouplingConfig, autoBaseKVA float64, bank *SlaveBank) *Meter {
 	v := cfg.Voltage
 	if v == 0 {
 		v = defaultVoltage
@@ -71,6 +81,10 @@ func NewMeter(cfg MeterConfig, defaultVoltage float64, bank *SlaveBank) *Meter {
 		gridVoltage: v,
 		ptRatio:     pt,
 		ctRatio:     ct,
+		coupling:    resolveCoupling(coupling, defaultGridCoupling(), autoBaseKVA),
+		outflow:     cfg.FlowDirection == "outflow",
+		// 起始按空载：并网点电压等于额定，后续每 tick 由潮流推开。
+		busVoltage: v,
 	}
 }
 
@@ -83,6 +97,7 @@ func (m *Meter) Update(dtSeconds float64, in MeterInput) {
 	// 关口无功 = 负载无功（按固定 tanφ 推算）+ PCS 实际无功；
 	// PV 逆变器按单位功率因数运行，不产生无功。
 	m.reactiveKVar = in.LoadKW*loadTanPhi() + in.PCSKVAr
+	m.updateVoltage(dtSeconds)
 
 	if dtSeconds <= 0 {
 		return
@@ -93,6 +108,32 @@ func (m *Meter) Update(dtSeconds float64, in MeterInput) {
 	} else {
 		m.reverseKWh += -deltaKWh
 	}
+}
+
+// updateVoltage 按本 tick 潮流刷新并网点电压：
+// 从电网买电（充电、带负载）压低电压，向电网卖电（放电、光伏倒送）抬高电压；
+// 从电网吸收感性无功压低电压，向电网发出容性无功抬高电压。
+func (m *Meter) updateVoltage(dtSeconds float64) {
+	// busVoltageTarget 要的是「注入为正」，而这里手上的是「买电为正」，故整体取反。
+	target := busVoltageTarget(m.coupling, m.gridVoltage, -m.physicalImportKW(), -m.physicalImportKVAr())
+	m.busVoltage = relaxVoltage(m.busVoltage, target, dtSeconds, m.coupling.ResponseSeconds)
+}
+
+// physicalImportKW 返回相对上游电网的真实有功潮流，> 0 = 从电网买电。
+// flow_direction 只是表计的显示正方向，反转它不改变物理潮流，所以电压偏移必须先还原。
+func (m *Meter) physicalImportKW() float64 {
+	if m.outflow {
+		return -m.gridPowerKW
+	}
+	return m.gridPowerKW
+}
+
+// physicalImportKVAr 返回相对上游电网的真实无功潮流，> 0 = 从电网吸收（感性）。
+func (m *Meter) physicalImportKVAr() float64 {
+	if m.outflow {
+		return -m.reactiveKVar
+	}
+	return m.reactiveKVar
 }
 
 func (m *Meter) Sync() {
@@ -120,12 +161,18 @@ func (m *Meter) Sync() {
 	m.bank.WriteS32(RegMeterForwardEnergyHi, int32(m.forwardKWh*100/ptct))
 	m.bank.WriteS32(RegMeterReverseEnergyHi, int32(m.reverseKWh*100/ptct))
 
-	// 三相电压 ±0.5% jitter；phaseVoltages 保留一次侧，寄存器存二次侧 (U16, 0.1 V)
+	// 三相电压 ±0.1% jitter；基准取随潮流变化的 busVoltage 而非额定值，
+	// phaseVoltages 保留一次侧，寄存器存二次侧 (U16, 0.1 V)
+	//
+	// 抖动幅度从 ±0.5% 收到 ±0.1%：±0.5% 在 10 kV 上是 ±50 V，比无功推开的电压还大，
+	// 上游看到的是噪声而不是自己的调节结果，Q(U) 闭环的过冲和振铃全被盖住。真机电表
+	// 的有效值读数本来也没有逐拍 ±0.5% 的随机跳动。±0.1% 折合 ±10 V，恰好一个寄存器
+	// 最小刻度（二次侧 0.1 V × PT 100），仍能体现三相不平衡。
 	phaseVoltages := [3]float64{}
 	phaseVoltRegs := [3]uint16{RegMeterVoltageA, RegMeterVoltageB, RegMeterVoltageC}
 	for i, reg := range phaseVoltRegs {
-		jitter := 1.0 + (rand.Float64()*0.01 - 0.005)
-		v := m.gridVoltage * jitter
+		jitter := 1.0 + (rand.Float64()*0.002 - 0.001)
+		v := m.busVoltage * jitter
 		phaseVoltages[i] = v
 		secondary := v / m.ptRatio
 		m.bank.WriteU16(reg, uint16(secondary*10))

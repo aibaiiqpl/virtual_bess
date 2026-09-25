@@ -121,11 +121,17 @@ func NewSimulator(cfg *Config, server *mbserver.Server) *Simulator {
 		loadIdxByName[ld.Name()] = i
 	}
 
+	// 站内 PCS 额定容量之和：并网点等效阻抗未整定 base_kva 时的兜底标幺基准。
+	var sitePCSRatedKVA float64
+	for _, buCfg := range cfg.BatteryUnits {
+		sitePCSRatedKVA += buCfg.RatedPowerKW
+	}
+
 	for _, mCfg := range cfg.Meters {
 		bank := NewSlaveBank(mCfg.SlaveID, false)
 		sim.banks[mCfg.SlaveID] = bank
 		agg := &meterAgg{
-			meter:   NewMeter(mCfg, sim.gridVoltage, bank),
+			meter:   NewMeter(mCfg, sim.gridVoltage, cfg.Grid.Coupling, sitePCSRatedKVA, bank),
 			isMain:  mCfg.IsMain,
 			outflow: mCfg.FlowDirection == "outflow",
 		}
@@ -246,6 +252,9 @@ func (sim *Simulator) Tick() {
 	for _, bu := range sim.batteries {
 		bu.ProcessBMSControls()
 		bu.ProcessPCSControls()
+		// 先按上一 tick 的出力刷新母线电压，再算本 tick 出力：
+		// Q-U 下垂读的是这里更新出来的电压，顺序颠倒会让下垂晚一拍跟随自己的无功。
+		bu.UpdateGridVoltage(dt)
 		bu.ProcessPowerCommand()
 		bu.UpdateEnergy(dt)
 	}
@@ -273,13 +282,12 @@ func (sim *Simulator) updateMeters(dt float64) {
 		for _, i := range agg.pcsIdx {
 			// 有功：BatteryUnit 是「负充正放」，电表侧要的是「充电为正」（充电即从电网买电），故取反。
 			pcs -= sim.batteries[i].ActualPowerKW()
-			// 无功取反，让关口表方向与现场一致。
+			// 无功取反：PCS 侧用 IES900 原生口径（正=容性=向电网发出），关口表用
+			// 表计口径（正=感性=从电网吸收），同一股无功在两处符号必然相反。
 			//
-			// 真机 IES900 的 61850 无功方向与二级 EMS 相反，emu 设备级点表因此在
-			// 无功的下发与遥测两侧都写了源系数 -1（见 Latvia 的 PCS-IEC61850-MMS.csv）。
-			// 对 EMS 而言两次取反抵消、闭环自洽；但关口表是不经过点表换算的第三方观测者，
-			// 抵消不到它。仿真器的 PCS 建模用的是 EMS 那一侧的方向（感性为正），
-			// 所以站点实际无功方向与现场相反，需要在这里补一次取反。
+			// 这不是方向矛盾：两条母线的电压仍然同向——PCS 发容性时 PCS 母线电压按
+			// +Q 抬升，关口表拿到 -Q 记为「向电网倒送无功」，updateVoltage 再取反还原成
+			// 注入为正，同样抬升（见 grid_voltage.go 与 meter.updateVoltage）。
 			pcsReactive -= sim.batteries[i].ActualReactiveKVAr()
 		}
 		for _, i := range agg.pvIdx {
