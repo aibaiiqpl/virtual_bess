@@ -29,6 +29,7 @@ type BatteryUnit struct {
 	remoteMode           bool
 	gridTied             bool
 	actualPowerKW        float64
+	actualReactiveKVAr   float64
 	lastPowerCmdRaw      uint16
 	lastPowerCmdAliasRaw uint16
 	// PCS DC 欠压故障（HV 未合时尝试开机，或运行中 HV 被拉开）；置位后需通过故障复位清除
@@ -71,6 +72,8 @@ func NewBatteryUnit(cfg BatteryUnitConfig, pcsACVoltage float64, pcs, bms *Slave
 }
 
 func (bu *BatteryUnit) ActualPowerKW() float64 { return bu.actualPowerKW }
+
+func (bu *BatteryUnit) ActualReactiveKVAr() float64 { return bu.actualReactiveKVAr }
 
 func (bu *BatteryUnit) PCSSlaveID() uint8 { return bu.pcs.SlaveID }
 
@@ -156,6 +159,7 @@ func (bu *BatteryUnit) ProcessBMSControls() {
 		}
 		bu.bmsHVClosed = false
 		bu.actualPowerKW = 0
+		bu.actualReactiveKVAr = 0
 		bu.bms.WriteU16(RegBMSOpenHV, 0)
 	}
 	if bu.bms.ReadU16(RegBMSFaultReset) == 1 {
@@ -184,12 +188,14 @@ func (bu *BatteryUnit) ProcessPCSControls() {
 		}
 		bu.pcsRunning = false
 		bu.actualPowerKW = 0
+		bu.actualReactiveKVAr = 0
 		bu.pcs.WriteU16(RegPCSShutdown, 0)
 	}
 	if bu.pcs.ReadU16(RegPCSEStop) == 1 {
 		zaplog.Warnf("PCS[%d] emergency stop", bu.pcs.SlaveID)
 		bu.pcsRunning = false
 		bu.actualPowerKW = 0
+		bu.actualReactiveKVAr = 0
 		bu.pcs.WriteU16(RegPCSEStop, 0)
 	}
 	if bu.pcs.ReadU16(RegPCSFaultReset) == 1 {
@@ -202,10 +208,9 @@ func (bu *BatteryUnit) ProcessPCSControls() {
 func (bu *BatteryUnit) ProcessPowerCommand() {
 	cmdRaw := bu.syncPowerCommandRegisters()
 	if bu.pcsRunning && bu.remoteMode && bu.bmsHVClosed {
-		// RegPCSPowerCmd 按真机 IES1000/IES900 约定取值：负=充电、正=放电。
-		// 内部 actualPowerKW 用相反的“正充负放”语义驱动电量/电表/状态，
-		// 故此处取反，完成“设备约定 → 内部约定”转换（对齐 emu-go ChargeSign=-1）。
-		cmdPowerKW := -float64(uint16ToInt16(cmdRaw)) * 0.1
+		// RegPCSPowerCmd 约定：正=充电、负=放电（正充负放），与内部 actualPowerKW 同号。
+		// 设备约定与内部约定一致，无需取反。
+		cmdPowerKW := float64(uint16ToInt16(cmdRaw)) * 0.1
 		if cmdPowerKW > bu.ratedPowerKW {
 			cmdPowerKW = bu.ratedPowerKW
 		}
@@ -219,6 +224,24 @@ func (bu *BatteryUnit) ProcessPowerCommand() {
 		// 就地模式：保持当前功率不变
 	} else {
 		bu.actualPowerKW = 0
+	}
+}
+
+// ProcessReactivePowerCommand 处理 30014 无功指令：正值表示感性无功，负值表示容性无功。
+func (bu *BatteryUnit) ProcessReactivePowerCommand() {
+	if bu.pcsRunning && bu.remoteMode && bu.bmsHVClosed {
+		cmdKVAr := float64(uint16ToInt16(bu.pcs.ReadU16(RegPCSReactiveCmd))) * 0.1
+		if cmdKVAr > bu.ratedPowerKW {
+			cmdKVAr = bu.ratedPowerKW
+		}
+		if cmdKVAr < -bu.ratedPowerKW {
+			cmdKVAr = -bu.ratedPowerKW
+		}
+		bu.actualReactiveKVAr = cmdKVAr
+	} else if !bu.remoteMode {
+		// 就地模式：保持当前无功不变。
+	} else {
+		bu.actualReactiveKVAr = 0
 	}
 }
 

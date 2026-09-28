@@ -29,8 +29,9 @@ const (
 	RegPCSShutdown      = 30004 // 1-shutdown
 	RegPCSEStop         = 30005 // 1-emergency stop
 	RegPCSRemoteLocal   = 30006 // 0-local, 1-remote
-	RegPCSPowerCmdAlias = 3010  // S16, 0.1kW, alias of RegPCSPowerCmd（真机约定：负充正放）
-	RegPCSPowerCmd      = 30010 // S16, 0.1kW, negative=charge, positive=discharge（对齐真机 IES1000/IES900）
+	RegPCSPowerCmdAlias = 3010  // S16, 0.1kW, alias of RegPCSPowerCmd（约定：正充负放）
+	RegPCSPowerCmd      = 30010 // S16, 0.1kW, positive=charge, negative=discharge（正充负放）
+	RegPCSReactiveCmd   = 30014 // S16, 0.1kVAr, positive=inductive, negative=capacitive（正感性负容性）
 )
 
 // PV control registers (writable)
@@ -244,6 +245,15 @@ const (
 	RegMeterPFCHi             = 10055
 	RegMeterPFCLo             = 10056
 	RegMeterFrequency         = 10057 // U16, 0.01 Hz
+
+	// 线电压（相间电压）。6.6kV 系统线电压 ~6600V，×10 超过 U16 上限，
+	// 故用 S32（0.1 V，高位在前），与相电压 U16 区分。
+	RegMeterLineVoltageABHi = 10058 // S32 hi, 0.1 V
+	RegMeterLineVoltageABLo = 10059
+	RegMeterLineVoltageBCHi = 10060
+	RegMeterLineVoltageBCLo = 10061
+	RegMeterLineVoltageCAHi = 10062
+	RegMeterLineVoltageCALo = 10063
 )
 
 // clusterIR returns the absolute Input Register address for a given cluster index and offset.

@@ -16,7 +16,16 @@ type GridConfig struct {
 	// Frequency 电网标称频率 Hz：50（默认，中国/欧洲）或 60（日本东部、北美等 60Hz 区域）。
 	// 统一供电表 / PCS / PV 同步点写频率寄存器，避免在多处硬编码。
 	Frequency float64 `yaml:"frequency"`
+	// FrequencySource 控制电表频率来源：
+	//   "random"（默认）围绕标称频率随机波动；"modbus" 保留外部写入的寄存器值。
+	// PCS / PV 始终使用 Frequency 标称值，不受此选项影响。
+	FrequencySource string `yaml:"frequency_source"`
 }
+
+const (
+	frequencySourceRandom = "random"
+	frequencySourceModbus = "modbus"
+)
 
 type PCSConfig struct {
 	// ACVoltage 是 PCS / PV 逆变器 AC 出口的相电压（升压变低压侧），
@@ -188,7 +197,7 @@ func DefaultConfig() Config {
 	return Config{
 		Modbus:   ModbusConfig{Address: ":502"},
 		IEC61850: IEC61850Config{Address: ":102"},
-		Grid:     GridConfig{Voltage: 220},
+		Grid:     GridConfig{Voltage: 220, Frequency: defaultGridFrequencyHz, FrequencySource: frequencySourceRandom},
 		PCS:      PCSConfig{ACVoltage: 400},
 		BatteryUnits: []BatteryUnitConfig{{
 			PCSSlaveID:         1,
@@ -254,6 +263,9 @@ func (c *Config) applyDefaults() {
 	if c.Grid.Frequency == 0 {
 		c.Grid.Frequency = defaultGridFrequencyHz
 	}
+	if c.Grid.FrequencySource == "" {
+		c.Grid.FrequencySource = frequencySourceRandom
+	}
 	if c.Modbus.Address == "" {
 		c.Modbus.Address = ":502"
 	}
@@ -318,6 +330,11 @@ func applyAirConditionerDefaults(cfg *AirConditionerConfig) {
 
 // validate 校验 slaveId 唯一且非零，至少一个电池单元、一个电表。
 func (c *Config) validate() error {
+	switch c.Grid.FrequencySource {
+	case frequencySourceRandom, frequencySourceModbus:
+	default:
+		return fmt.Errorf("grid.frequency_source must be random or modbus, got %q", c.Grid.FrequencySource)
+	}
 	if len(c.BatteryUnits) == 0 {
 		return fmt.Errorf("at least one battery_unit is required")
 	}
@@ -346,8 +363,12 @@ func (c *Config) validate() error {
 		if err := check(bu.PCSSlaveID, fmt.Sprintf("battery_units[%d].pcs", i)); err != nil {
 			return err
 		}
-		if err := check(bu.BMSSlaveID, fmt.Sprintf("battery_units[%d].bms", i)); err != nil {
-			return err
+		// PCS 与 BMS 同号表示合并成单个 EMU slave（PCS/BMS 寄存器地址天然不重叠）。
+		// 此时跳过 BMS 的唯一性校验，否则会与本单元 PCS 撞号误报。
+		if bu.BMSSlaveID != bu.PCSSlaveID {
+			if err := check(bu.BMSSlaveID, fmt.Sprintf("battery_units[%d].bms", i)); err != nil {
+				return err
+			}
 		}
 		pcsIDs[bu.PCSSlaveID] = true
 		bmsIDs[bu.BMSSlaveID] = true

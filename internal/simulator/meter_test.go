@@ -94,6 +94,32 @@ func TestMeterApparentPowerCorrect(t *testing.T) {
 	}
 }
 
+func TestMeterIncludesPCSReactivePower(t *testing.T) {
+	m := newTestMeter(t)
+	// 无负载时，电表无功应完全来自 PCS；负值表示 PCS 提供容性补偿。
+	m.UpdateWithReactive(0, 0, 0, 0, -25.5)
+	m.Sync()
+
+	got := readS32Bank(m.bank.Holding, RegMeterReactivePWTotalHi)
+	if got != -25500 {
+		t.Fatalf("meter reactive power = %d, want -25500", got)
+	}
+}
+
+func TestSimulatorAggregatesPCSReactivePower(t *testing.T) {
+	sim := newTestSimulator(t)
+	sim.batteries[0].actualReactiveKVAr = 40
+	sim.loads[0].actualPowerKW = 0
+
+	sim.updateMeters(0)
+	sim.meters[0].meter.Sync()
+
+	got := readS32Bank(sim.meters[0].meter.bank.Holding, RegMeterReactivePWTotalHi)
+	if got != 40000 {
+		t.Fatalf("aggregated meter reactive power = %d, want 40000", got)
+	}
+}
+
 func TestMeterCurrentSignFollowsActivePower(t *testing.T) {
 	// Import: current positive
 	m := newTestMeter(t)
@@ -129,6 +155,24 @@ func TestMeterFrequencyJitter(t *testing.T) {
 		if v < 4990 || v > 5010 {
 			t.Errorf("frequency %v outside expected jitter band", v)
 		}
+	}
+}
+
+func TestMeterFrequencyFromModbusIsPreserved(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Grid.FrequencySource = frequencySourceModbus
+	sim := NewSimulator(&cfg, mustNewServer())
+	meter := sim.meters[0].meter
+
+	if got := meter.bank.ReadU16(RegMeterFrequency); got != 5000 {
+		t.Fatalf("initial frequency = %d, want 5000", got)
+	}
+	if err := sim.WriteHolding(cfg.Meters[0].SlaveID, RegMeterFrequency, 4992); err != nil {
+		t.Fatalf("WriteHolding() error = %v", err)
+	}
+	meter.Sync()
+	if got := meter.bank.ReadU16(RegMeterFrequency); got != 4992 {
+		t.Fatalf("frequency after Sync = %d, want external value 4992", got)
 	}
 }
 

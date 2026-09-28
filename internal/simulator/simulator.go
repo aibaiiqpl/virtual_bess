@@ -82,16 +82,35 @@ func NewSimulator(cfg *Config, server *mbserver.Server) *Simulator {
 
 	// 创建 N 套电池单元。
 	for _, buCfg := range cfg.BatteryUnits {
-		pcsBank := NewSlaveBank(buCfg.PCSSlaveID, false)
-		bmsBank := NewSlaveBank(buCfg.BMSSlaveID, true)
-		sim.banks[buCfg.PCSSlaveID] = pcsBank
-		sim.banks[buCfg.BMSSlaveID] = bmsBank
+		// PCS 与 BMS 同号：合并成单个 EMU slave，PCS/BMS 共用一份寄存器 bank。
+		// PCS holding(1~30180)、BMS holding(40000+)、簇 input 地址互不重叠，可安全共存。
+		merged := buCfg.BMSSlaveID == buCfg.PCSSlaveID
+
+		var pcsBank, bmsBank *SlaveBank
+		if merged {
+			bank := NewSlaveBank(buCfg.PCSSlaveID, true)
+			pcsBank, bmsBank = bank, bank
+			sim.banks[buCfg.PCSSlaveID] = bank
+		} else {
+			pcsBank = NewSlaveBank(buCfg.PCSSlaveID, false)
+			bmsBank = NewSlaveBank(buCfg.BMSSlaveID, true)
+			sim.banks[buCfg.PCSSlaveID] = pcsBank
+			sim.banks[buCfg.BMSSlaveID] = bmsBank
+		}
 
 		bu := NewBatteryUnit(buCfg, cfg.PCS.ACVoltage, pcsBank, bmsBank)
 		sim.batteries = append(sim.batteries, bu)
 
-		sim.writeHandlers[buCfg.PCSSlaveID] = bu.OnPCSWrite
-		sim.writeHandlers[buCfg.BMSSlaveID] = bu.OnBMSWrite
+		if merged {
+			// 单 slave 上的写同时喂给 PCS/BMS 处理器；两者按地址分派，互不干扰。
+			sim.writeHandlers[buCfg.PCSSlaveID] = func(addr, value uint16) {
+				bu.OnPCSWrite(addr, value)
+				bu.OnBMSWrite(addr, value)
+			}
+		} else {
+			sim.writeHandlers[buCfg.PCSSlaveID] = bu.OnPCSWrite
+			sim.writeHandlers[buCfg.BMSSlaveID] = bu.OnBMSWrite
+		}
 	}
 
 	// 创建 M 套 PV。
@@ -122,7 +141,7 @@ func NewSimulator(cfg *Config, server *mbserver.Server) *Simulator {
 		bank := NewSlaveBank(mCfg.SlaveID, false)
 		sim.banks[mCfg.SlaveID] = bank
 		agg := &meterAgg{
-			meter:   NewMeter(mCfg, sim.gridVoltage, bank),
+			meter:   NewMeter(mCfg, cfg.Grid, bank),
 			isMain:  mCfg.IsMain,
 			outflow: mCfg.FlowDirection == "outflow",
 		}
@@ -234,6 +253,7 @@ func (sim *Simulator) Tick() {
 		bu.ProcessBMSControls()
 		bu.ProcessPCSControls()
 		bu.ProcessPowerCommand()
+		bu.ProcessReactivePowerCommand()
 		bu.UpdateEnergy(dt)
 	}
 
@@ -256,9 +276,10 @@ func (sim *Simulator) Tick() {
 
 func (sim *Simulator) updateMeters(dt float64) {
 	for _, agg := range sim.meters {
-		var pcs, pv, load float64
+		var pcs, pcsReactive, pv, load float64
 		for _, i := range agg.pcsIdx {
 			pcs += sim.batteries[i].ActualPowerKW()
+			pcsReactive += sim.batteries[i].ActualReactiveKVAr()
 		}
 		for _, i := range agg.pvIdx {
 			pv += sim.pvs[i].ActualPowerKW()
@@ -268,9 +289,9 @@ func (sim *Simulator) updateMeters(dt float64) {
 		}
 		if agg.outflow {
 			// 翻转方向：发电/放电变为 forward
-			agg.meter.Update(dt, -load, -pcs, -pv)
+			agg.meter.UpdateWithReactive(dt, -load, -pcs, -pv, -pcsReactive)
 		} else {
-			agg.meter.Update(dt, load, pcs, pv)
+			agg.meter.UpdateWithReactive(dt, load, pcs, pv, pcsReactive)
 		}
 	}
 }

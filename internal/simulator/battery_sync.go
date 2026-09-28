@@ -75,7 +75,19 @@ func (bu *BatteryUnit) syncSystemStatus(powerKW float64) {
 	isRunning := bu.pcsRunning && powerKW != 0 && !hasFault
 
 	bu.pcs.WriteU16(RegSysRunning, boolToU16(isRunning))
-	bu.pcs.WriteU16(RegSysFault, boolToU16(hasFault))
+	// 故障时按功率方向区分：正充负放，充电中为充电故障(2)、放电中为放电故障(3)，其余为其它故障(1)
+	var faultCode uint16
+	if hasFault {
+		switch {
+		case powerKW > 0:
+			faultCode = 2
+		case powerKW < 0:
+			faultCode = 3
+		default:
+			faultCode = 1
+		}
+	}
+	bu.pcs.WriteU16(RegSysFault, faultCode)
 	bu.pcs.WriteU16(RegSysStandby, boolToU16(!isRunning && !hasFault))
 
 	bu.pcs.WriteU16(RegEMUBMSComm, 1)
@@ -134,23 +146,33 @@ func (bu *BatteryUnit) syncPCSStatus(powerKW float64) {
 }
 
 func (bu *BatteryUnit) syncPCSPower(powerKW float64) {
+	reactiveKVAr := bu.actualReactiveKVAr
+	apparentKVA := math.Sqrt(powerKW*powerKW + reactiveKVAr*reactiveKVAr)
+	pf := 1.0
+	if apparentKVA > 0 {
+		pf = math.Abs(powerKW) / apparentKVA
+	}
+
 	bu.pcs.WriteU16(RegPCSTotalActivePW, int16ToUint16(int16(powerKW*10)))
-	bu.pcs.WriteU16(RegPCSTotalReactPW, 0)
-	bu.pcs.WriteU16(RegPCSTotalApparent, uint16(math.Abs(powerKW)*10))
-	bu.pcs.WriteU16(RegPCSPowerFactor, int16ToUint16(100))
+	bu.pcs.WriteU16(RegPCSTotalReactPW, int16ToUint16(int16(reactiveKVAr*10)))
+	bu.pcs.WriteU16(RegPCSTotalApparent, uint16(apparentKVA*10))
+	bu.pcs.WriteU16(RegPCSPowerFactor, int16ToUint16(int16(pf*100)))
 
 	phasePW := int16(powerKW / 3.0 * 10)
 	bu.pcs.WriteU16(RegPCSActivePWA, int16ToUint16(phasePW))
 	bu.pcs.WriteU16(RegPCSActivePWB, int16ToUint16(phasePW))
 	bu.pcs.WriteU16(RegPCSActivePWC, int16ToUint16(phasePW))
 
-	bu.pcs.WriteU16(RegPCSReactPWA, 0)
-	bu.pcs.WriteU16(RegPCSReactPWB, 0)
-	bu.pcs.WriteU16(RegPCSReactPWC, 0)
+	phaseReactive := int16(reactiveKVAr / 3.0 * 10)
+	bu.pcs.WriteU16(RegPCSReactPWA, int16ToUint16(phaseReactive))
+	bu.pcs.WriteU16(RegPCSReactPWB, int16ToUint16(phaseReactive))
+	bu.pcs.WriteU16(RegPCSReactPWC, int16ToUint16(phaseReactive))
 }
 
 func (bu *BatteryUnit) syncPCSGrid(powerKW float64) {
 	phasePowerKW := powerKW / 3.0
+	phaseReactiveKVAr := bu.actualReactiveKVAr / 3.0
+	phaseApparentKVA := math.Sqrt(phasePowerKW*phasePowerKW + phaseReactiveKVAr*phaseReactiveKVAr)
 
 	phaseRegs := []uint16{RegPCSVoltageA, RegPCSVoltageB, RegPCSVoltageC}
 	for _, reg := range phaseRegs {
@@ -162,7 +184,10 @@ func (bu *BatteryUnit) syncPCSGrid(powerKW float64) {
 	for i, reg := range currentRegs {
 		phaseVoltage := float64(bu.pcs.ReadU16(phaseRegs[i])) * 0.1
 		if phaseVoltage > 0 {
-			currentA := phasePowerKW * 1000.0 / phaseVoltage
+			currentA := phaseApparentKVA * 1000.0 / phaseVoltage
+			if phasePowerKW < 0 {
+				currentA = -currentA
+			}
 			bu.pcs.WriteU16(reg, int16ToUint16(int16(currentA*10)))
 		}
 	}

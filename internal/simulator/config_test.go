@@ -5,6 +5,24 @@ import (
 	"testing"
 )
 
+func TestGridFrequencyDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.Grid.Frequency != 50 {
+		t.Fatalf("frequency = %v, want 50", cfg.Grid.Frequency)
+	}
+	if cfg.Grid.FrequencySource != frequencySourceRandom {
+		t.Fatalf("frequency_source = %q, want %q", cfg.Grid.FrequencySource, frequencySourceRandom)
+	}
+}
+
+func TestGridFrequencySourceValidation(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Grid.FrequencySource = "external"
+	if err := cfg.validate(); err == nil {
+		t.Fatal("validate() error = nil, want invalid frequency_source error")
+	}
+}
+
 func TestIEC61850GOOSEConfigDefaultsAndParsesCIDAddress(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.IEC61850.Enabled = true

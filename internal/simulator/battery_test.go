@@ -12,8 +12,8 @@ func TestPowerCommandAlias3010AppliesLike30010(t *testing.T) {
 	bu.pcs.WriteU16(RegPCSPowerCmdAlias, 500)
 	bu.ProcessPowerCommand()
 
-	// 命令寄存器为真机约定（正=放电），内部 actualPowerKW 取反为 -50（放电）。
-	assertPowerNear(t, bu.actualPowerKW, -50)
+	// 命令寄存器正充负放（正=充电），内部 actualPowerKW 同号 +50（充电）。
+	assertPowerNear(t, bu.actualPowerKW, 50)
 	assertPowerCommandRegisters(t, bu, 500)
 }
 
@@ -38,8 +38,8 @@ func TestPowerCommand30010StillAppliesAndMirrorsAlias(t *testing.T) {
 	bu.pcs.WriteU16(RegPCSPowerCmd, raw)
 	bu.ProcessPowerCommand()
 
-	// 命令寄存器为真机约定（负=充电），内部 actualPowerKW 取反为 +50（充电）。
-	assertPowerNear(t, bu.actualPowerKW, 50)
+	// 命令寄存器正充负放（负=放电），内部 actualPowerKW 同号 -50（放电）。
+	assertPowerNear(t, bu.actualPowerKW, -50)
 	assertPowerCommandRegisters(t, bu, raw)
 }
 
@@ -55,6 +55,35 @@ func TestPowerCommandAlias3010DoesNotApplyInLocalMode(t *testing.T) {
 		t.Fatalf("actualPowerKW = %v, want unchanged 12.3", bu.actualPowerKW)
 	}
 	assertPowerCommandRegisters(t, bu, 500)
+}
+
+func TestReactivePowerCommand30014UpdatesPCSRegisters(t *testing.T) {
+	bu := newReadyBattery(t)
+	raw := int16ToUint16(-123) // -12.3 kVAr，容性无功。
+	bu.pcs.WriteU16(RegPCSReactiveCmd, raw)
+
+	bu.ProcessReactivePowerCommand()
+	bu.Sync()
+
+	assertFloatNear(t, bu.actualReactiveKVAr, -12.3)
+	if got := bu.pcs.ReadU16(RegPCSTotalReactPW); got != raw {
+		t.Fatalf("RegPCSTotalReactPW = %d, want %d", got, raw)
+	}
+	if got := uint16ToInt16(bu.pcs.ReadU16(RegPCSReactPWA)); got != -41 {
+		t.Fatalf("RegPCSReactPWA = %d, want -41", got)
+	}
+}
+
+func TestReactivePowerCommandStopsWithPCS(t *testing.T) {
+	bu := newReadyBattery(t)
+	bu.pcs.WriteU16(RegPCSReactiveCmd, 250)
+	bu.ProcessReactivePowerCommand()
+	bu.pcsRunning = false
+	bu.ProcessReactivePowerCommand()
+
+	if bu.actualReactiveKVAr != 0 {
+		t.Fatalf("actualReactiveKVAr = %v, want 0", bu.actualReactiveKVAr)
+	}
 }
 
 func assertPowerCommandRegisters(t *testing.T, bu *BatteryUnit, want uint16) {

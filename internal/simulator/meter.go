@@ -16,23 +16,27 @@ type Meter struct {
 	bank *SlaveBank
 	name string
 
+	nominalFrequencyHz float64
+	frequencySource    string
+
 	gridVoltage float64 // 一次侧电压 V
 	ptRatio     float64 // 电压互感器变比（一次/二次）
 	ctRatio     float64 // 电流互感器变比（一次/二次）
 
 	// 当前 tick 输入
-	gridPowerKW float64
-	loadPowerKW float64
+	gridPowerKW     float64
+	loadPowerKW     float64
+	pcsReactiveKVAr float64
 
 	// 累计能量
 	forwardKWh float64
 	reverseKWh float64
 }
 
-func NewMeter(cfg MeterConfig, defaultVoltage float64, bank *SlaveBank) *Meter {
+func NewMeter(cfg MeterConfig, grid GridConfig, bank *SlaveBank) *Meter {
 	v := cfg.Voltage
 	if v == 0 {
-		v = defaultVoltage
+		v = grid.Voltage
 	}
 	pt := cfg.PTRatio
 	if pt <= 0 {
@@ -47,13 +51,18 @@ func NewMeter(cfg MeterConfig, defaultVoltage float64, bank *SlaveBank) *Meter {
 	if ct <= 0 {
 		ct = 1
 	}
-	return &Meter{
-		bank:        bank,
-		name:        cfg.Name,
-		gridVoltage: v,
-		ptRatio:     pt,
-		ctRatio:     ct,
+	m := &Meter{
+		bank:               bank,
+		name:               cfg.Name,
+		gridVoltage:        v,
+		ptRatio:            pt,
+		ctRatio:            ct,
+		nominalFrequencyHz: grid.Frequency,
+		frequencySource:    grid.FrequencySource,
 	}
+	// Modbus 模式启动时也给出有效初值；之后 Sync 不再覆盖外部写入。
+	m.bank.WriteU16(RegMeterFrequency, uint16(m.nominalFrequencyHz*100))
+	return m
 }
 
 // Update 根据 load / ΣPCS / ΣPV 重新计算电表功率并累计能量。
@@ -63,8 +72,14 @@ func NewMeter(cfg MeterConfig, defaultVoltage float64, bank *SlaveBank) *Meter {
 //	PV  actualPowerKW: 永远 >= 0（注入）
 //	Load actualPowerKW: 永远 >= 0（消耗）
 func (m *Meter) Update(dtSeconds, loadPowerKW, totalPCSKW, totalPVKW float64) {
+	m.UpdateWithReactive(dtSeconds, loadPowerKW, totalPCSKW, totalPVKW, 0)
+}
+
+// UpdateWithReactive 同时聚合 PCS 无功；正值表示从电网吸收感性无功。
+func (m *Meter) UpdateWithReactive(dtSeconds, loadPowerKW, totalPCSKW, totalPVKW, totalPCSKVAr float64) {
 	m.loadPowerKW = loadPowerKW
 	m.gridPowerKW = loadPowerKW + totalPCSKW - totalPVKW
+	m.pcsReactiveKVAr = totalPCSKVAr
 
 	if dtSeconds <= 0 {
 		return
@@ -80,9 +95,9 @@ func (m *Meter) Update(dtSeconds, loadPowerKW, totalPCSKW, totalPVKW float64) {
 func (m *Meter) Sync() {
 	gridPowerKW := m.gridPowerKW
 
-	// 无功只来自负载（PV/PCS 在 unity PF）；负载是感性的，Q >= 0
+	// 负载无功与 PCS 无功在 PCC 叠加；PCS 正值为感性吸收，负值为容性补偿。
 	tanPhi := math.Sqrt(1-loadPowerFactor*loadPowerFactor) / loadPowerFactor
-	reactiveKVar := m.loadPowerKW * tanPhi
+	reactiveKVar := m.loadPowerKW*tanPhi + m.pcsReactiveKVAr
 
 	apparentKVA := math.Sqrt(gridPowerKW*gridPowerKW + reactiveKVar*reactiveKVar)
 
@@ -110,6 +125,15 @@ func (m *Meter) Sync() {
 		phaseVoltages[i] = v
 		secondary := v / m.ptRatio
 		m.bank.WriteU16(reg, uint16(secondary*10))
+	}
+
+	// 线电压（相间）：平衡三相下 |Uxy| = √3 × 相电压。取相邻两相幅值均值 ×√3，
+	// 让线电压跟随相电压 jitter。二次侧同样除 PT，S32(0.1 V)。
+	lineVoltRegs := [3]uint16{RegMeterLineVoltageABHi, RegMeterLineVoltageBCHi, RegMeterLineVoltageCAHi}
+	for i, hiReg := range lineVoltRegs {
+		vLine := math.Sqrt(3) * (phaseVoltages[i] + phaseVoltages[(i+1)%3]) / 2.0
+		secondary := vLine / m.ptRatio
+		m.bank.WriteS32(hiReg, int32(secondary*10))
 	}
 
 	// 三相电流 (S32, 0.1 A)：幅值跟视在功率，符号跟有功方向
@@ -157,7 +181,9 @@ func (m *Meter) Sync() {
 	m.bank.WriteS32(RegMeterPFBHi, pf1000)
 	m.bank.WriteS32(RegMeterPFCHi, pf1000)
 
-	// 频率围绕电网标称频率 ±0.05 Hz 抖动（50Hz 或日本等 60Hz 区域）
-	freqHz := gridFrequencyHz + (rand.Float64()*2-1)*0.05
-	m.bank.WriteU16(RegMeterFrequency, uint16(freqHz*100))
+	if m.frequencySource == frequencySourceRandom {
+		// 随机模式下，频率围绕电网标称值 ±0.05 Hz 抖动。
+		freqHz := m.nominalFrequencyHz + (rand.Float64()*2-1)*0.05
+		m.bank.WriteU16(RegMeterFrequency, uint16(freqHz*100))
+	}
 }
